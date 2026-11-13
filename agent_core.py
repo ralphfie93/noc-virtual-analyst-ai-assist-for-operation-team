@@ -50,7 +50,11 @@ timestamp_myt is TEXT 'YYYY-MM-DD HH:MM:00' (MYT) and sorts lexicographically â€
 BETWEEN for ranges. latency 9999.0 = TIMEOUT (exclude from averages). Aggregate hourly for
 trends; keep result sets small. When you do read the runbook, answer ONLY from it (never
 invent codes/thresholds). Return concrete figures; say whether an issue is single-site or a
-hub-side fault that must ESCALATE."""
+hub-side fault that must ESCALATE.
+
+LANGUAGE: reply in the SAME language the user wrote in. If the user writes in Malay, answer in
+proper Bahasa Melayu (Malaysian spelling, e.g. "rangkaian", "sila", "anda" â€” not Indonesian).
+Keep technical identifiers, codes and table/column names unchanged."""
 
 IDIRECT_INSTR = f"""You are the iDirect Analyst (ST Engineering Evolution, GEO Ku). You cover
 iDirect remotes (IDR-R01..R10) in idirect_performance and the iDirect hub in hub_components
@@ -124,7 +128,11 @@ clarifying question instead of calling every agent.
 
 Pass the specialist the full user question. Then synthesise ONE concise, operational answer
 with concrete figures, and state clearly whether the issue is single-site or a hub/space-
-segment fault that must ESCALATE. Lead with the answer."""
+segment fault that must ESCALATE. Lead with the answer.
+
+LANGUAGE: always reply in the SAME language the user used. If the user writes in Malay, answer
+in proper Bahasa Melayu (Malaysian, not Indonesian). Keep identifiers, fault codes and table
+names unchanged."""
 
 
 # --------------------------------------------------------------------------- #

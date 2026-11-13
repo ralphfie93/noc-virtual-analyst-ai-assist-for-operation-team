@@ -62,6 +62,10 @@ _INJECTION_PATTERNS = [
     "bypass the", "override your", "drop table", "delete from", "truncate table",
     "wipe the database", "modify the database", "delete the", "drop the",
     "erase the", "wipe the", "update the", "insert into",
+    # Bahasa Melayu injection / mutation phrases (multi-word to avoid false positives
+    # with legitimate NOC terms like "terminal padam" = terminal is down).
+    "abaikan arahan", "lupakan arahan", "padam jadual", "padamkan jadual",
+    "hapus jadual", "hapuskan jadual", "buang jadual", "jatuhkan jadual",
 ]
 
 # Obvious off-topic requests (scope guard). Weather IS in scope (rain-fade), so it
@@ -73,18 +77,26 @@ _OFF_TOPIC_PATTERNS = [
     "who is the president", "who is the prime minister", "prime minister",
     "president of", "capital of", "who won", "how old is", "what year",
     "football", "election", "stock price", "translate this to",
+    # Bahasa Melayu off-topic / trivia.
+    "perdana menteri", "presiden", "puisi", "pantun", "sajak", "tulis lagu",
+    "jenaka", "lawak", "resipi", "tulis cerita", "tulis esei", "ibu negara",
+    "ibu kota", "siapa menang", "bola sepak", "pilihan raya", "kerja rumah",
 ]
 
 _INJECTION_MSG = (
     "🛡️ **Request blocked (prompt-injection guardrail).** I can't act on instructions "
     "that try to override my operating rules or modify data. I'm a read-only NOC "
-    "assistant — ask me about terminal/hub telemetry, incidents, or the runbooks."
+    "assistant — ask me about terminal/hub telemetry, incidents, or the runbooks.\n\n"
+    "_Permintaan disekat (pengawal suntikan arahan). Saya hanya pembantu NOC baca-sahaja "
+    "dan tidak boleh mengubah data._"
 )
 _OFF_TOPIC_MSG = (
     "🛡️ I'm the NOC Virtual Analyst — I only help with satellite network operations "
     "(iDirect, JUPITER, Starlink terminals, the hub, incidents, runbooks, and site "
     "weather for rain-fade). That request is outside my scope. What can I help you "
-    "troubleshoot?"
+    "troubleshoot?\n\n"
+    "_Saya Pembantu Maya NOC — saya hanya membantu hal operasi rangkaian satelit. "
+    "Permintaan itu di luar skop saya. Apa yang boleh saya bantu selesaikan?_"
 )
 
 
