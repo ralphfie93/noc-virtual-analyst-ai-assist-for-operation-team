@@ -1,5 +1,5 @@
 {
-  "description": "Golden test cases for the multi-system NOC Copilot. Facts are grounded in the seeded-incident catalog (Database/README_SCHEMA.md §4) and verified against terminal_ops.db. Cases span iDirect, JUPITER and Starlink to exercise the coordinator's per-system routing.",
+  "description": "Golden test cases for the multi-system NOC Assistant. Facts are grounded in the seeded-incident catalog (Database/README_SCHEMA.md §4) and verified against terminal_ops.db. Cases span iDirect, JUPITER and Starlink to exercise the coordinator's per-system routing.",
   "cases": [
     {
       "id": "hub-faults-week",

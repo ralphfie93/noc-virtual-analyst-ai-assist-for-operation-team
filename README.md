@@ -1,4 +1,4 @@
-# 🛰️ NOC Copilot — Satellite Operations Assistant
+# 🛰️ NOC Assistant — Satellite Operations Assistant
 
 A production-grade **Enterprise Intelligence Virtual Analyst** for a satellite network
 operations centre (NOC). It helps L1 operators triage **iDirect**, **HNS JUPITER** and
@@ -49,7 +49,7 @@ accumulates token counts and estimated USD cost, surfaced in the UI and in the a
 | 5 — Evaluation harness | `eval.py` + `capstone_golden.json` (LLM-as-a-Judge, 1–5) |
 | 6 — Deployment | `app.py`, `requirements.txt`, `st.secrets`, Streamlit Community Cloud |
 
-UI extras: Copilot-style chat with conversation history, suggestion starters, telemetry
+UI extras: a clean chat with conversation history, suggestion starters, telemetry
 charts, incident-report export, and the live migration simulator (zero-code schema evolution).
 
 ---

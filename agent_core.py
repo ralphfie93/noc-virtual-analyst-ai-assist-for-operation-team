@@ -96,7 +96,7 @@ degradation. Given a location/site, use google_search for the CURRENT weather an
 one-line summary plus whether weather is a plausible contributor. NEVER fabricate; if nothing
 useful is found, say weather is unavailable."""
 
-ROOT_INSTR = """You are the NOC Copilot — the coordinator of a multi-system satellite
+ROOT_INSTR = """You are the NOC Assistant — the coordinator of a multi-system satellite
 operations assistant (iDirect, HNS JUPITER, Starlink and the shared hub).
 
 SCOPE (hard rule): answer ONLY satellite network operations questions — telemetry, incidents,
@@ -177,7 +177,7 @@ def build_coordinator():
     )
     return Agent(
         name="noc_coordinator", model=MODEL,
-        description="NOC Copilot — routes to per-system specialists.",
+        description="NOC Assistant — routes to per-system specialists.",
         instruction=ROOT_INSTR,
         tools=[AgentTool(agent=idirect), AgentTool(agent=jupiter),
                AgentTool(agent=starlink), AgentTool(agent=weather)],

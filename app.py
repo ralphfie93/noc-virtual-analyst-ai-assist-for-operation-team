@@ -1,12 +1,12 @@
 """
-app.py — NOC Copilot (AI Assist for the Operations Team).
+app.py — NOC Assistant (AI Assist for the Operations Team).
 
 A production-grade multi-agent assistant for satellite network operations,
 built on Google ADK + MCP + Streamlit. See README.md for the architecture summary.
 
-UI: a Microsoft Copilot-inspired console — aurora gradient, a floating chat panel,
-a centered welcome with a big input and suggestion cards, conversation history in the
-left rail, a Tools menu and a Settings modal (assistant personality).
+UI: aurora gradient, a floating chat panel, a centered welcome with a big input and
+realistic suggestion cards, and a left rail with per-chat history, Tools and Settings.
+Each conversation has its OWN agent session, so chats never share context.
 """
 
 import os
@@ -20,10 +20,12 @@ import streamlit as st
 import mcp_server  # in-process read-only helpers for charts / schema inspector
 from config import DB_PATH, MODEL
 
+APP_TITLE = "NOC Assistant"
+
 # --------------------------------------------------------------------------- #
 # 1. Page config + styling
 # --------------------------------------------------------------------------- #
-st.set_page_config(page_title="NOC Copilot", page_icon="🛰️", layout="wide",
+st.set_page_config(page_title=APP_TITLE, page_icon="🛰️", layout="wide",
                    initial_sidebar_state="expanded")
 
 st.markdown(
@@ -36,25 +38,21 @@ st.markdown(
         font-family:'Inter', system-ui, sans-serif !important; }
       #MainMenu, footer { visibility:hidden; height:0; }
 
-      /* Aurora gradient behind everything */
       .stApp { background: linear-gradient(135deg,#E9EDFF 0%,#F3EBFF 28%,#FDEBF4 55%,
                #EAF2FF 80%,#EFEBFF 100%); }
       [data-testid="stAppViewContainer"], [data-testid="stMain"],
       [data-testid="stHeader"] { background: transparent !important; }
 
-      /* Floating white panel for the main content */
       [data-testid="stMain"] .block-container {
         background:#FFFFFF; border-radius:26px; border:1px solid rgba(2,6,23,.05);
         box-shadow:0 20px 60px rgba(91,91,214,.12); max-width:900px;
-        margin-top:1.4rem; margin-bottom:2rem; padding:2rem 2.6rem 2.6rem; }
+        margin-top:1.4rem; margin-bottom:2rem; padding:2.2rem 2.6rem 2.6rem; }
 
-      /* Hero (centered) */
       .hero-greet { text-align:center; font-size:2.35rem; font-weight:700; color:var(--ink);
-        letter-spacing:-0.02em; margin:1.2rem 0 .4rem; }
+        letter-spacing:-0.02em; margin:.6rem 0 .4rem; }
       .hero-sub { text-align:center; color:var(--muted); font-size:1.02rem; line-height:1.5;
         max-width:54ch; margin:0 auto 1.5rem; }
 
-      /* Centered welcome input */
       .st-key-welcomebox [data-baseweb="input"],
       .st-key-welcomebox [data-baseweb="base-input"] { border-radius:16px !important; }
       .st-key-welcomebox input {
@@ -64,27 +62,24 @@ st.markdown(
         border-radius:14px !important; background:var(--accent) !important;
         color:#fff !important; font-weight:600 !important; }
 
-      /* Suggestion cards */
       .st-key-cards button {
         border:1px solid var(--line) !important; border-radius:16px !important;
-        background:var(--panel) !important; color:var(--ink) !important; padding:16px !important;
-        min-height:76px; font-weight:500 !important; justify-content:flex-start !important;
+        background:var(--panel) !important; color:var(--ink) !important; padding:15px !important;
+        min-height:92px; font-weight:500 !important; justify-content:flex-start !important;
         text-align:left !important; box-shadow:none !important;
         transition:transform .12s ease,border-color .12s ease,background .12s ease; }
       .st-key-cards button:hover { border-color:var(--accent) !important;
         background:#fff !important; transform:translateY(-2px); }
-      .st-key-cards button p { text-align:left !important; width:100%; margin:0; }
+      .st-key-cards button p { text-align:left !important; width:100%; margin:0;
+        white-space:normal; line-height:1.35; }
 
-      /* Bottom chat input pill */
       [data-testid="stChatInput"] { border-radius:24px !important;
         box-shadow:0 8px 24px rgba(2,6,23,.07); }
 
-      /* Cost chip */
       .cost-chip { display:inline-block; padding:5px 12px; border-radius:999px;
         background:var(--accent-soft); color:var(--accent); font-size:0.8rem;
         font-weight:600; white-space:nowrap; }
 
-      /* Sidebar */
       [data-testid="stSidebar"] { background:rgba(255,255,255,.72);
         backdrop-filter:blur(8px); border-right:1px solid var(--line); }
       [data-testid="stSidebar"] .stButton button { text-align:left !important;
@@ -93,7 +88,8 @@ st.markdown(
       .rail-title { font-size:1.15rem; font-weight:700; color:var(--ink); margin:.2rem 0 .1rem; }
       .rail-sub { color:var(--muted); font-size:.78rem; margin-bottom:.6rem; }
       .rail-head { color:var(--muted); font-size:.72rem; font-weight:600;
-        letter-spacing:.04em; margin:.8rem 0 .3rem; }
+        letter-spacing:.04em; margin:.9rem 0 .3rem; }
+      .rail-empty { color:var(--muted); font-size:.8rem; font-style:italic; padding:.2rem 0; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -126,7 +122,7 @@ from agent_core import AnalystBackend  # noqa: E402
 from guardrails import COST            # noqa: E402
 
 
-@st.cache_resource(show_spinner="Starting the NOC Copilot…")
+@st.cache_resource(show_spinner="Starting the NOC Assistant…")
 def get_backend():
     return AnalystBackend()
 
@@ -152,9 +148,8 @@ CHART_CONFIG = {
 def list_entities(table: str, id_col: str):
     conn = mcp_server._connect_ro()
     try:
-        rows = conn.execute(
-            f"SELECT DISTINCT {id_col} FROM {table} ORDER BY {id_col}").fetchall()
-        return [r[0] for r in rows]
+        return [r[0] for r in conn.execute(
+            f"SELECT DISTINCT {id_col} FROM {table} ORDER BY {id_col}").fetchall()]
     finally:
         conn.close()
 
@@ -170,8 +165,7 @@ def chart_frame(table: str, id_col: str, entity: str, metrics: tuple):
     finally:
         conn.close()
     df["timestamp_myt"] = pd.to_datetime(df["timestamp_myt"])
-    df = df.set_index("timestamp_myt").replace(9999.0, pd.NA)
-    return df
+    return df.set_index("timestamp_myt").replace(9999.0, pd.NA)
 
 
 def schema_text() -> str:
@@ -181,8 +175,7 @@ def schema_text() -> str:
         info = json.loads(mcp_server.mcp_describe_table(t))
         lines.append(f"{t}")
         for c in info["columns"]:
-            flags = " PK" if c["pk"] else ""
-            lines.append(f"    {c['name']:<26} {c['type']}{flags}")
+            lines.append(f"    {c['name']:<26} {c['type']}{' PK' if c['pk'] else ''}")
         lines.append("")
     return "\n".join(lines)
 
@@ -230,7 +223,7 @@ def demo_table_exists() -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# 5. Personality + conversation state
+# 5. Personality
 # --------------------------------------------------------------------------- #
 TONE_DIRECTIVES = {
     "Concise L1": "Be terse and operational; lead with the answer, minimal prose.",
@@ -242,7 +235,7 @@ TONE_DIRECTIVES = {
 VERBOSITY_DIRECTIVES = {"Brief": "Keep the answer very short.",
                         "Balanced": "Use a moderate length.",
                         "Detailed": "Be comprehensive."}
-DEFAULT_SETTINGS = {"name": "NOC Copilot", "tone": "Concise L1", "custom": "",
+DEFAULT_SETTINGS = {"name": APP_TITLE, "tone": "Concise L1", "custom": "",
                     "verbosity": "Balanced", "emoji": True}
 
 
@@ -254,12 +247,29 @@ def persona_preamble(s: dict) -> str:
             f"Tone: {tone} Verbosity: {VERBOSITY_DIRECTIVES[s['verbosity']]} {emoji}]")
 
 
+# --------------------------------------------------------------------------- #
+# 6. Conversation state — each chat has its OWN agent session (no cross-talk)
+# --------------------------------------------------------------------------- #
 def new_conversation():
+    # prune empty conversations so blank "New chat" rows don't pile up
+    for cid in [k for k, v in st.session_state.conversations.items() if not v["messages"]]:
+        del st.session_state.conversations[cid]
     cid = uuid.uuid4().hex[:8]
     st.session_state.conversations[cid] = {
         "title": "New chat", "messages": [], "created": datetime.now()}
     st.session_state.current_id = cid
     return cid
+
+
+def delete_conversation(cid):
+    st.session_state.conversations.pop(cid, None)
+    if st.session_state.current_id == cid:
+        remaining = sorted(st.session_state.conversations.items(),
+                           key=lambda kv: kv[1]["created"], reverse=True)
+        if remaining:
+            st.session_state.current_id = remaining[0][0]
+        else:
+            new_conversation()
 
 
 if "settings" not in st.session_state:
@@ -276,7 +286,7 @@ messages = convo["messages"]
 
 
 # --------------------------------------------------------------------------- #
-# 6. Settings + Tools modals
+# 7. Settings + Tools modals
 # --------------------------------------------------------------------------- #
 @st.dialog("⚙️ Assistant settings")
 def settings_dialog():
@@ -295,7 +305,7 @@ def settings_dialog():
     st.caption("Applied to your next message — no restart needed.")
     c1, c2 = st.columns(2)
     if c1.button("Save", type="primary", use_container_width=True):
-        st.session_state.settings = {"name": name.strip() or "NOC Copilot", "tone": tone,
+        st.session_state.settings = {"name": name.strip() or APP_TITLE, "tone": tone,
                                      "custom": custom, "verbosity": verbosity,
                                      "emoji": emoji}
         st.rerun()
@@ -326,10 +336,9 @@ def tools_dialog():
             if st.button("Remove demo table", use_container_width=True):
                 drop_demo_table()
                 st.rerun()
-        else:
-            if st.button(f"➕ Add `{DEMO_TABLE}` table", use_container_width=True):
-                add_demo_table()
-                st.rerun()
+        elif st.button(f"➕ Add `{DEMO_TABLE}` table", use_container_width=True):
+            add_demo_table()
+            st.rerun()
     with t3:
         st.text(schema_text())
     with t4:
@@ -345,48 +354,59 @@ def tools_dialog():
 
 
 # --------------------------------------------------------------------------- #
-# 7. Sidebar — conversation history rail
+# 8. Sidebar — history rail + Tools/Settings
 # --------------------------------------------------------------------------- #
 backend = get_backend()
 
 with st.sidebar:
-    st.markdown("<div class='rail-title'>🛰️ NOC Copilot</div>"
+    st.markdown(f"<div class='rail-title'>🛰️ {APP_TITLE}</div>"
                 "<div class='rail-sub'>Satellite operations assistant</div>",
                 unsafe_allow_html=True)
     if st.button("➕  New chat", use_container_width=True, type="primary"):
         new_conversation()
         st.rerun()
+
     st.markdown("<div class='rail-head'>RECENT</div>", unsafe_allow_html=True)
-    for cid, c in sorted(st.session_state.conversations.items(),
-                         key=lambda kv: kv[1]["created"], reverse=True):
+    recent = [(cid, c) for cid, c in sorted(
+        st.session_state.conversations.items(),
+        key=lambda kv: kv[1]["created"], reverse=True) if c["messages"]]
+    if not recent:
+        st.markdown("<div class='rail-empty'>No conversations yet</div>",
+                    unsafe_allow_html=True)
+    for cid, c in recent:
         active = cid == st.session_state.current_id
-        label = "💬  " + (c["title"][:30] + "…" if len(c["title"]) > 30 else c["title"])
-        if st.button(label, key=f"conv_{cid}", use_container_width=True, disabled=active):
+        title = c["title"][:26] + "…" if len(c["title"]) > 26 else c["title"]
+        row, bin_ = st.columns([0.82, 0.18])
+        if row.button(("💬  " + title), key=f"conv_{cid}",
+                      use_container_width=True, disabled=active):
             st.session_state.current_id = cid
             st.rerun()
+        if bin_.button("🗑️", key=f"del_{cid}", help="Delete chat"):
+            delete_conversation(cid)
+            st.rerun()
 
-# --------------------------------------------------------------------------- #
-# 8. Top actions (right-aligned)
-# --------------------------------------------------------------------------- #
-_, actions = st.columns([0.5, 0.5])
-with actions:
+    st.divider()
     snap = COST.snapshot()
-    st.markdown(f"<div style='text-align:right;margin-bottom:6px'>"
-                f"<span class='cost-chip'>${snap['usd']:.4f} · {snap['calls']} calls</span>"
-                f"</div>", unsafe_allow_html=True)
-    b_tools, b_set = st.columns(2)
-    if b_tools.button("🛠️ Tools", use_container_width=True):
+    st.markdown(f"<span class='cost-chip'>💰 ${snap['usd']:.4f} · {snap['calls']} calls"
+                f"</span>", unsafe_allow_html=True)
+    st.write("")
+    if st.button("🛠️  Tools", use_container_width=True):
         tools_dialog()
-    if b_set.button("⚙️ Settings", use_container_width=True):
+    if st.button("⚙️  Settings", use_container_width=True):
         settings_dialog()
 
 # --------------------------------------------------------------------------- #
 # 9. Welcome (empty) or transcript
 # --------------------------------------------------------------------------- #
 WELCOME_CARDS = [
-    ("📶", "Why is an iDirect remote offline?"),
-    ("🌧️", "JUPITER slow — rain fade or data cap?"),
-    ("🛰️", "Did Starlink dishes drop together?"),
+    ("📊", "Check iDirect terminal health this week and give an RCA report for any site "
+           "with issues"),
+    ("📡", "JUPITER fleet health report — flag and explain any degraded or throttled "
+           "terminals this week"),
+    ("🛰️", "Which Starlink dishes had problems this week, and what caused each?"),
+    ("🔧", "My iDirect terminal shows RX and TX amber — what should I check?"),
+    ("🌐", "Why can't I get internet from my JUPITER terminal?"),
+    ("🌧️", "STAR-D06 is down per our monitoring — what's the weather at its site?"),
 ]
 
 if not messages:
@@ -395,25 +415,27 @@ if not messages:
              "Good afternoon" if hour < 18 else "Good evening")
     st.markdown(f"<div class='hero-greet'>{greet} — how can I help?</div>",
                 unsafe_allow_html=True)
-    st.markdown(f"<div class='hero-sub'>I'm {settings['name']}. I read live iDirect, JUPITER "
-                f"and Starlink telemetry, follow the NOC runbooks, and can check site weather "
-                f"— all read-only.</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='hero-sub'>I'm the {settings['name']}. I read live iDirect, "
+                f"JUPITER and Starlink telemetry, follow the NOC runbooks, and can check "
+                f"site weather — all read-only.</div>", unsafe_allow_html=True)
 
     with st.container(key="welcomebox"):
         _, mid, _ = st.columns([1, 6, 1])
         with mid:
             with st.form("welcome_form", clear_on_submit=True, border=False):
                 q = st.text_input("msg", label_visibility="collapsed",
-                                  placeholder="Message NOC Copilot…")
+                                  placeholder=f"Message {settings['name']}…")
                 sent = st.form_submit_button("Ask", use_container_width=True)
             if sent and q and q.strip():
                 st.session_state.pending = q.strip()
                 st.rerun()
 
     with st.container(key="cards"):
-        ccols = st.columns(3)
+        row1 = st.columns(3)
+        row2 = st.columns(3)
         for i, (icon, text) in enumerate(WELCOME_CARDS):
-            if ccols[i].button(f"{icon}  {text}", key=f"sg_{i}", use_container_width=True):
+            col = (row1 if i < 3 else row2)[i % 3]
+            if col.button(f"{icon}  {text}", key=f"sg_{i}", use_container_width=True):
                 st.session_state.pending = text
                 st.rerun()
 else:
@@ -423,7 +445,7 @@ else:
             st.markdown(m["content"])
 
 # --------------------------------------------------------------------------- #
-# 10. Input handling
+# 10. Input handling — per-conversation session (isolated memory)
 # --------------------------------------------------------------------------- #
 prompt = None
 if st.session_state.get("pending"):
@@ -440,11 +462,13 @@ if prompt:
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
     styled = f"{persona_preamble(settings)}\n\nUser question: {prompt}"
+    session_id = st.session_state.current_id            # one ADK session per chat
+    backend.ensure_session(session_id)
     with st.chat_message("assistant", avatar="🛰️"):
-        with st.spinner("Coordinating specialists — routing, telemetry, runbooks & "
-                        "weather (this can take 20–40s)…"):
+        with st.spinner("Working on it — routing, telemetry, runbooks & weather "
+                        "(this can take 20–40s)…"):
             try:
-                answer = backend.ask(styled)
+                answer = backend.ask(styled, session_id=session_id)
             except Exception as exc:  # noqa: BLE001
                 answer = f"⚠️ Error: {exc}"
         st.markdown(answer)
@@ -462,7 +486,7 @@ if messages and messages[-1]["role"] == "assistant":
         f"- **Generated:** {datetime.now():%Y-%m-%d %H:%M} (local)\n"
         f"- **Query:** {last_user}\n\n"
         f"## Analyst finding\n\n{messages[-1]['content']}\n\n"
-        f"---\n*Generated by the NOC Copilot. Mock training data; verify against live "
+        f"---\n*Generated by the {APP_TITLE}. Mock training data; verify against live "
         f"NMS before acting.*\n")
     st.download_button(
         "📥 Download incident report (.md)", report,
