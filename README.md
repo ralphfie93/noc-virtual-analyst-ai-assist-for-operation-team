@@ -12,64 +12,69 @@ Built with **Google ADK** (multi-agent), the **Model Context Protocol** (MCP), a
 
 ## Problem statement
 
-When an issue arises, the NOC has to **troubleshoot it manually**. For each incident the
-operator stops to **look up the right documentation** — platform guidelines, reference
-runbooks, and the internal case history — before they can decide what to check next. This is
-**slow**, and it does not scale:
+When something goes wrong, the NOC team has to troubleshoot it by hand. For every incident the
+operator first has to stop and look up the right documentation, such as the platform
+guidelines, the reference runbooks, and the internal case history, before they can even decide
+what to check next. This takes a lot of time, and it does not scale well.
 
-- **Every issue is unique.** The same symptom (e.g. "terminal degraded") can have very
-  different causes and therefore very different troubleshooting steps depending on the
-  platform (iDirect / JUPITER / Starlink), the component, and the conditions at the time.
-- **The knowledge is scattered.** Correct next steps live across several documents plus the
-  live telemetry; an L1 operator has to read, cross-reference, and interpret all of it under
-  time pressure, often during an active outage.
-- **It depends on experience.** Senior engineers do this quickly from memory; newer L1 staff
-  spend far longer, and the quality of the first response varies from person to person.
+Three things make it hard:
 
-We have already **documented the known issues case-by-case** (the runbooks / knowledge base),
-but a human still has to find the relevant case, match it to what the telemetry is showing,
-and work out whether it is a single-site problem or a hub-side fault. That lookup-and-correlate
-step is the bottleneck we want to remove.
+* **Every issue is different.** The same symptom, for example "the terminal looks degraded",
+  can have very different causes, and so very different fixing steps, depending on the platform
+  (iDirect, JUPITER or Starlink), the component involved, and the conditions at that moment.
+* **The knowledge is spread out.** The correct next steps live across several documents plus
+  the live telemetry, so an operator has to read all of it, connect the dots, and interpret it
+  under pressure, very often while the outage is still happening.
+* **It depends on experience.** Senior engineers do this quickly from memory, while newer
+  staff take much longer, so the quality of the first response changes from person to person.
+
+We have already written down the known issues one case at a time (that is our knowledge base),
+but a human still has to find the matching case, compare it with what the telemetry is showing,
+and work out whether it is just one site or a bigger hub fault where many terminals are failing
+at once. That "find it and match it" step is the slow part we want to remove.
 
 ## Objective
 
-Build an **AI-powered Virtual NOC Assistant** (chatbot) that gives L1 operators a **fast,
-grounded first response** to any terminal issue, so triage no longer depends on manually
-hunting through documentation.
+Build an AI powered Virtual NOC Assistant (a chatbot) that gives operators a fast and reliable
+first answer to any terminal issue, so that troubleshooting no longer depends on manually
+digging through documents.
 
-Given a plain-language question, the assistant will:
+When an operator asks a question in plain language, the assistant will:
 
-1. **Detect & scope the issue faster** — query the operational **database** directly to see
-   what the telemetry is actually doing, and determine whether it is a single terminal or a
-   shared hub/space-segment fault (many terminals failing together).
-2. **Provide an RCA and the next-step solution** — grounded **only** in the documented
-   **knowledge base** (runbooks), so the recommended actions, fault codes, and L1-vs-escalate
-   boundaries are consistent with approved procedure instead of model guesswork.
-3. **Route intelligently** — send each question to the correct platform specialist
-   (iDirect / JUPITER / Starlink) and pull in **site weather** when rain-fade is implicated.
-4. **Stay safe and auditable** — read-only access to data, input guardrails (PII masking,
-   prompt-injection and off-topic blocking), and per-answer **cost/latency observability**.
+1. **Spot and size up the issue faster.** It queries the operational database directly to see
+   what the telemetry is really doing, and works out whether the problem is a single terminal
+   or a shared hub fault where many terminals are failing together.
+2. **Give a root cause and the next step to take.** Its advice comes only from the approved
+   knowledge base (the runbooks), so the recommended actions, the fault codes, and the call on
+   whether the operator can fix it or must escalate all stay in line with real procedure
+   instead of model guesswork.
+3. **Send each question to the right expert automatically.** It picks the correct platform
+   specialist (iDirect, JUPITER or Starlink), and it also checks the site weather when rain
+   fade might be the cause.
+4. **Stay safe and easy to audit.** It can only read data, never change it. It screens every
+   incoming request (hiding personal data, and blocking injection attempts and off topic
+   questions), and it tracks the cost of every answer.
 
-**Outcome:** faster detection, a consistent first-response quality regardless of who is on
-shift, and less time lost to documentation lookup during incidents — while keeping a human in
-the loop (the assistant advises; it never changes anything).
+In short: faster detection, a first response that is equally good no matter who is on shift,
+and far less time lost to looking things up during an incident, all while keeping a human in
+control. The assistant advises. It never changes anything by itself.
 
 ---
 
-## Block diagram — overall architecture
+## Block diagram (overall architecture)
 
 ```mermaid
 flowchart TD
-    OP["👩‍💻 NOC L1 Operator"] -->|plain-language question| UI["Streamlit Chat UI<br/>(app.py) · per-chat memory"]
+    OP["👩‍💻 NOC Operator"] -->|plain language question| UI["Streamlit Chat UI<br/>(app.py) · per chat memory"]
 
-    UI --> GR1{"🛡️ Input Guardrail<br/>(before_model_callback)<br/>PII mask · injection · off-topic"}
+    UI --> GR1{"🛡️ Input Guardrail<br/>(before_model_callback)<br/>PII mask · injection · off topic"}
     GR1 -->|blocked| UI
-    GR1 -->|allowed| ROOT["🧭 Root Coordinator<br/>(Google ADK) — routes by platform"]
+    GR1 -->|allowed| ROOT["🧭 Root Coordinator<br/>(Google ADK), routes by platform"]
 
     ROOT -->|iDirect| A1["iDirect Analyst"]
     ROOT -->|JUPITER| A2["JUPITER Analyst"]
     ROOT -->|Starlink| A3["Starlink Analyst"]
-    ROOT -->|weather / rain-fade| W["🌧️ Weather Checker<br/>(Google Search grounding)"]
+    ROOT -->|weather / rain fade| W["🌧️ Weather Checker<br/>(Google Search grounding)"]
 
     A1 --> MCP
     A2 --> MCP
@@ -77,7 +82,7 @@ flowchart TD
 
     subgraph DATA["🔌 Enterprise integration (MCP server · stdio subprocess)"]
         MCP["mcp_server.py<br/>5 discovery tools:<br/>list / describe / read_query / list / read_policy"]
-        GR2{"🛡️ Data Guardrail<br/>read-only URI · sqlparse AST<br/>blocks any mutation/DDL"}
+        GR2{"🛡️ Data Guardrail<br/>read only URI · sqlparse AST<br/>blocks any mutation/DDL"}
         MCP --> GR2
         GR2 --> DB[("🗄️ SQLite<br/>terminal_ops.db<br/>telemetry + hub")]
         GR2 --> KB[["📚 Knowledge Base<br/>runbooks (.md)"]]
@@ -95,15 +100,45 @@ flowchart TD
     A3 -.-> COST
     COST -.-> UI
 
-    EVAL["🧪 LLM-as-a-Judge<br/>eval.py · golden cases"] -.->|same agent stack| ROOT
+    EVAL["🧪 LLM as a Judge<br/>eval.py · golden cases"] -.->|same agent stack| ROOT
 ```
 
-**Read it top to bottom:** the operator asks in plain language → the **input guardrail** screens
-the request → the **root coordinator** routes to the one relevant platform specialist (plus
-weather if needed) → specialists reach the database and runbooks **only** through the **MCP
-server**, where the **data guardrail** enforces read-only access → the coordinator synthesises a
-single RCA + next-step answer back to the UI. Every model call is metered for **cost**, and the
-**same agent stack** is what the automated evaluation harness grades.
+**How to read it, from top to bottom.** The operator asks a question in plain language. The
+input guardrail checks the request first. The root coordinator then decides which single
+platform specialist should handle it, and brings in the weather checker only when it is needed.
+The specialists can reach the database and the runbooks **only** through the MCP server, where
+the data guardrail keeps every access read only. The coordinator then writes one clear answer,
+a root cause plus the next steps to take, and sends it back to the screen. Every model call is
+measured for cost, and the very same setup is what the automatic evaluation grades.
+
+---
+
+## How to run the live demo
+
+Click the suggested cards on the welcome screen in this order. In a few minutes it shows every
+capability of the assistant.
+
+1. **Routing to the right specialist.** Click *"My iDirect terminal shows RX and TX amber. What
+   should I check?"*. Only the iDirect specialist wakes up, reads the telemetry, and answers
+   from the iDirect runbook. The other specialists stay asleep.
+2. **Reading real data and scoping the issue.** Ask *"Check iDirect terminal health this week
+   and give an RCA report for any site with issues"*. The assistant pulls real figures from the
+   database and tells you whether it is one site or a shared hub fault that must be escalated.
+3. **Weather awareness.** Click *"STAR-D06 is down per our monitoring. What is the weather at
+   its site?"*. The assistant brings in the weather checker to see whether rain is a likely
+   cause.
+4. **Live database discovery (this proves the MCP integration is real).** Open the sidebar, go
+   to **Tools**, then the **Migration** tab, and add the `maintenance_windows` table. Now click
+   the card *"What data tables can you query right now?"*. The new table appears in the answer
+   with no code change at all.
+5. **Guardrails.** Click *"Delete the hub_components table."*. The assistant refuses, explains
+   that it is read only, and nothing is deleted. You can also try an off topic question, such as
+   asking for a poem, and it will politely decline and steer you back to operations.
+6. **Cost and observability.** After a few questions, look at the bottom of the sidebar, or open
+   **Tools** then the **Cost** tab, to see the running token count and the estimated cost.
+
+> Tip: the blocked requests in step 5 are supposed to cost nothing, because they are stopped
+> before they ever reach the model. That is the guardrail doing its job.
 
 ---
 
