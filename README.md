@@ -49,8 +49,9 @@ accumulates token counts and estimated USD cost, surfaced in the UI and in the a
 | 5 — Evaluation harness | `eval.py` + `capstone_golden.json` (LLM-as-a-Judge, 1–5) |
 | 6 — Deployment | `app.py`, `requirements.txt`, `st.secrets`, Streamlit Community Cloud |
 
-UI extras: a clean chat with conversation history, suggestion starters, telemetry
-charts, incident-report export, and the live migration simulator (zero-code schema evolution).
+UI extras: a clean chat with per-conversation history and isolated memory, suggestion
+starters, and a sidebar **Tools** panel — live migration simulator (zero-code schema
+evolution), schema inspector, and cost telemetry.
 
 ---
 
@@ -80,7 +81,7 @@ outage, IPGW outage) back the golden tests.
 ## Project layout
 
 ```
-app.py                 Streamlit UI (chat + history, charts, export, migration simulator)
+app.py                 Streamlit UI (chat + history, Tools: migration / schema / cost)
 agent_core.py          Root coordinator + iDirect / JUPITER / Starlink / weather specialists
 mcp_server.py          Stdio MCP server: 5 tools, AST guard, read-only URI
 guardrails.py          Input guardrails + cost-tracking callback
