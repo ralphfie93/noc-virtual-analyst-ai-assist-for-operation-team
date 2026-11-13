@@ -1,12 +1,12 @@
 # 🛰️ NOC Assistant — Satellite Operations Assistant
 
-A production-grade **Enterprise Intelligence Virtual Analyst** for a satellite network
-operations centre (NOC). It helps L1 operators triage **iDirect**, **HNS JUPITER** and
-**Starlink** terminals (and the shared hub) by grounding every answer in real telemetry and
-the NOC runbooks — safely, observably, and read-only.
+An AI Virtual NOC Assistant for a satellite network operations centre. It helps operators
+troubleshoot **iDirect**, **HNS JUPITER** and **Starlink** terminals (and the shared hub) by
+grounding every answer in the real telemetry and the NOC runbooks, safely and read only.
 
-Built with **Google ADK** (multi-agent), the **Model Context Protocol** (MCP), and
-**Streamlit**, using a single Gemini model (`gemini-3.5-flash`).
+Built with **Google ADK** (multiple agents), the **Model Context Protocol** (MCP) for data
+access, and **Streamlit** for the chat interface, using a single Gemini model
+(`gemini-3.5-flash`).
 
 ---
 
@@ -113,6 +113,54 @@ measured for cost, and the very same setup is what the automatic evaluation grad
 
 ---
 
+## How it works (the pieces behind the diagram)
+
+**The agents.** There is one root coordinator plus three platform specialists and a weather
+checker. The coordinator reads the question, works out which platform it is about, and hands it
+to just that one specialist instead of waking all of them. This keeps answers fast and cheap.
+For example, "Why is IDR-R03 degraded?" goes only to the iDirect specialist, while a question
+that clearly spans everything ("any hub faults across all systems?") may use more than one.
+Each specialist can read both the telemetry and the matching runbook, so it answers the data
+and the procedure in one place.
+
+**How it reaches the data (MCP).** All data access goes through a small server called the MCP
+server (`mcp_server.py`). It offers five simple tools: list the tables, describe a table, run a
+read query, list the policies, and read a policy. The assistant discovers the tables at runtime
+instead of having them hard coded, so you can add a new table and it can use it right away with
+no code change (this is what the migration demo shows).
+
+**Two layers of safety.** Safety is enforced twice, so one layer backs up the other:
+
+* **Input layer (`guardrails.py`).** Before the question reaches the model, it hides personal
+  data (emails, phone numbers, card and ID numbers), blocks prompt injection attempts (for
+  example "ignore your instructions" or "delete the table"), and politely refuses off topic
+  questions.
+* **Data layer (`mcp_server.py`).** The database is opened in read only mode, and every query
+  is parsed and checked so that anything which would change data is rejected, no matter how it
+  is worded. No write tool exists at all.
+
+**Cost tracking and evaluation.** Every time the model is called, a callback records the tokens
+used and the estimated cost, shown live in the app. Separately, `eval.py` grades the whole
+assistant automatically with an "LLM as a Judge": it asks a set of known test questions, then a
+second model scores each answer from 1 to 5 against the expected facts. The latest run scores a
+perfect 5.00 (see the benchmark below).
+
+---
+
+## The six capstone pillars
+
+| Pillar | Where it lives |
+|---|---|
+| 1. Multiple agents | `agent_core.py`: root coordinator that routes to the iDirect, JUPITER and Starlink specialists plus weather |
+| 2. Enterprise integration (MCP) | `mcp_server.py`: database and runbooks served through the MCP tools |
+| 3. Input guardrails | `guardrails.py`: PII masking, prompt injection and off topic blocking |
+| 3. Data guardrails | `mcp_server.py`: `is_sql_mutation` check plus read only connection |
+| 4. Observability and cost | `guardrails.py` cost callback, shown in the sidebar and the Tools → Cost tab |
+| 5. Evaluation harness | `eval.py` with `capstone_golden.json` (LLM as a Judge, scored 1 to 5) |
+| 6. Deployment | `app.py`, `requirements.txt`, `st.secrets`, Streamlit Community Cloud |
+
+---
+
 ## How to run the live demo
 
 Click the suggested cards on the welcome screen in this order. In a few minutes it shows every
@@ -142,88 +190,35 @@ capability of the assistant.
 
 ---
 
-## Architecture summary
-
-The assistant is a **root coordinator that routes to per-system specialists**. From each
-question the coordinator identifies the system and delegates to the **one** matching
-specialist — an iDirect analyst, a JUPITER analyst, or a Starlink analyst — rather than
-waking all of them, which keeps latency and model-call volume (and free-tier quota pressure)
-down. Each specialist owns both the MCP SQL tools and the MCP policy tools for its system, so
-it answers data and procedure in one place. A separate **Weather Checker** (built-in Google
-Search grounding) is consulted only when weather / rain fade is implicated.
-
-All data access goes through a **real stdio MCP server** (`mcp_server.py`, launched as a
-subprocess by ADK's `McpToolset`) exposing *discovery primitives* — `mcp_list_tables`,
-`mcp_describe_table`, `mcp_read_query`, `mcp_list_policies`, `mcp_read_policy`. Because the
-schema is discovered dynamically, the agent adapts to database changes with **zero code edits**
-(shown by the Live Migration Simulator).
-
-Safety is enforced in **two tiers**. At the **input tier**, an ADK `before_model_callback`
-masks PII, blocks prompt-injection attempts, and refuses off-topic requests before the model
-runs. At the **data tier**, the MCP server is the only path to the database: every connection
-is read-only (`file:...?mode=ro`), each query is verified by a `sqlparse` **AST check** that
-blocks any mutation/DDL however phrased, and no write tool is ever registered (protocol-level
-least privilege). Every model completion is metered by an `after_model_callback` that
-accumulates token counts and estimated USD cost, surfaced in the UI and in the automated
-**LLM-as-a-Judge** evaluation harness.
-
----
-
-## Pillars → where they live
-
-| Pillar | Implementation |
-|---|---|
-| 1 — Multi-agent | `agent_core.py` — root coordinator routing to iDirect / JUPITER / Starlink specialists + weather |
-| 2 — Enterprise integration (MCP) | `mcp_server.py` — SQLite + runbooks via MCP discovery primitives |
-| 3 — Input guardrails | `guardrails.py` — PII masking, prompt-injection + off-topic blocking |
-| 3 — Data guardrails | `mcp_server.py` — `is_sql_mutation` AST check + read-only URI |
-| 4 — Observability / cost | `guardrails.py` `after_model_cost_tracker` + top-bar cost chip & Tools → Cost tab |
-| 5 — Evaluation harness | `eval.py` + `capstone_golden.json` (LLM-as-a-Judge, 1–5) |
-| 6 — Deployment | `app.py`, `requirements.txt`, `st.secrets`, Streamlit Community Cloud |
-
-UI extras: a clean chat with per-conversation history and isolated memory, suggestion
-starters, and a sidebar **Tools** panel — live migration simulator (zero-code schema
-evolution), schema inspector, and cost telemetry.
-
----
-
-## Routing (why it's efficient)
-
-The coordinator's main job is routing. "Why is IDR-R03 degraded?" wakes only the **iDirect**
-analyst; "scope the STAR-POP-SIN outage" wakes only the **Starlink** analyst. Weather is
-pulled in only when a rain-fade / weather signature appears. Cross-fleet questions ("any hub
-faults across all systems?") may consult more than one specialist.
-
----
-
 ## Data scope
 
-One week of per-minute mock telemetry (2026-11-05 → 11), downsampled by `build_db.py` into the
-committed `Database/terminal_ops.db` (~44 MB):
+One week of mock telemetry at one row per minute (2026-11-05 to 2026-11-11), reduced by
+`build_db.py` into the committed `Database/terminal_ops.db` (about 44 MB):
 
-- `idirect_performance`, `jupiter_performance`, `starlink_performance` — 10 terminals each.
-- `hub_components` — shared hub / space-segment health that terminals JOIN to.
+* `idirect_performance`, `jupiter_performance`, `starlink_performance`: 10 terminals each.
+* `hub_components`: the shared hub and space segment health that terminals join to.
 
-Seeded incidents across all three systems (rain fade, pointing drift, line-card outage,
-PP high-CPU, FAP throttle, overheating, obstruction, thermal throttle, offline/reboot, PoP
-outage, IPGW outage) back the golden tests.
+Known incidents are seeded across all three systems (rain fade, pointing drift, line card
+outage, protocol processor high CPU, fair access throttle, overheating, obstruction, thermal
+throttle, offline and reboot, PoP outage, IPGW outage). These are what the golden test cases
+check against.
 
 ---
 
 ## Project layout
 
 ```
-app.py                 Streamlit UI (chat + history, Tools: migration / schema / cost)
-agent_core.py          Root coordinator + iDirect / JUPITER / Starlink / weather specialists
-mcp_server.py          Stdio MCP server: 5 tools, AST guard, read-only URI
-guardrails.py          Input guardrails + cost-tracking callback
+app.py                 Streamlit UI (chat and history, Tools: migration / schema / cost)
+agent_core.py          Root coordinator plus iDirect / JUPITER / Starlink / weather specialists
+mcp_server.py          Stdio MCP server: 5 tools, mutation guard, read only connection
+guardrails.py          Input guardrails plus the cost tracking callback
 config.py              Paths, model name, pricing
 build_db.py            Builds the committed terminal_ops.db
-eval.py                LLM-as-a-Judge harness
-capstone_golden.json   Golden test cases (span iDirect / JUPITER / Starlink + guardrails)
-Database/              terminal_ops.db + schema.sql + README_SCHEMA.md
-Knowledgebase/         idirect-hub-terminal.md, hns-jupiter.md, starlink.md + README.md
-.streamlit/            config.toml (theme) + secrets.toml.example
+eval.py                LLM as a Judge benchmark harness
+capstone_golden.json   Golden test cases (iDirect / JUPITER / Starlink plus guardrails)
+Database/              terminal_ops.db, schema.sql, README_SCHEMA.md
+Knowledgebase/         the three platform runbooks plus a README
+.streamlit/            config.toml (theme) and secrets.toml.example
 ```
 
 ---
@@ -232,21 +227,21 @@ Knowledgebase/         idirect-hub-terminal.md, hns-jupiter.md, starlink.md + RE
 
 ```bash
 pip install -r requirements.txt
-python build_db.py              # one-time; needs the large source DB
-# provide a Gemini key: copy .streamlit/secrets.toml.example -> .streamlit/secrets.toml
+python build_db.py              # one time; needs the large source DB
+# provide a Gemini key: copy .streamlit/secrets.toml.example to .streamlit/secrets.toml
 streamlit run app.py
 ```
 
-Benchmark: `python eval.py` (needs `GOOGLE_API_KEY` in the environment).
+Run the benchmark with `python eval.py` (needs `GOOGLE_API_KEY` in the environment).
 
 ---
 
 ## Deploy to Streamlit Community Cloud
 
-1. Push to GitHub (the large source DB is git-ignored; the ~44 MB `terminal_ops.db` is committed).
-2. On [share.streamlit.io](https://share.streamlit.io), create an app from the repo, main file `app.py`.
+1. Push to GitHub (the large source DB is ignored by git; the 44 MB `terminal_ops.db` is committed).
+2. On [share.streamlit.io](https://share.streamlit.io), create an app from the repo, with `app.py` as the main file.
 3. Under **App → Settings → Secrets**, add `GOOGLE_API_KEY = "your_gemini_api_key"`.
-4. Deploy. The MCP server runs as a subprocess in the same container.
+4. Deploy. The MCP server runs as a subprocess inside the same container.
 
 ---
 
@@ -269,14 +264,15 @@ Mean score: 5.00 / 5   (7 graded)
 Candidate spend: 1,819,207 in + 28,336 out tokens across 70 model calls = $2.98 USD
 ```
 
-All seven golden cases score 5/5, spanning per-system routing (iDirect / JUPITER /
-Starlink), rain-fade + weather, the FAP-throttle nuance, and both guardrails.
+All seven golden cases score 5 out of 5, covering routing to each platform, rain fade with
+weather, the fair access throttle nuance, and both guardrails.
 
 ---
 
-## Notes & limitations
+## Notes and limitations
 
-- **Mock data** — synthetic, seeded; verify against the live NMS before acting.
-- **Chat history is per session** (in-memory); a full page refresh starts a new session.
-- **Pricing constants** in `config.py` are the published Gemini 3.5-class figures at build
-  time — confirm current rates at <https://ai.google.dev/pricing>.
+* **Mock data.** The telemetry is synthetic and seeded. Verify against the live NMS before
+  acting on anything.
+* **Chat history is per session** and kept in memory, so a full page refresh starts fresh.
+* **Pricing constants** in `config.py` are the published Gemini 3.5 class figures at build
+  time. Confirm current rates at <https://ai.google.dev/pricing>.
