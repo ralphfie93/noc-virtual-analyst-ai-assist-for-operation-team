@@ -68,8 +68,11 @@ _INJECTION_PATTERNS = [
 # is intentionally absent here.
 _OFF_TOPIC_PATTERNS = [
     "poem", "haiku", "write a song", "tell me a joke", "recipe for",
-    "write a story", "write an essay", "do my homework", "who is the president",
-    "stock price", "translate this to",
+    "write a story", "write an essay", "do my homework",
+    # General-knowledge / trivia questions that are clearly outside NOC operations.
+    "who is the president", "who is the prime minister", "prime minister",
+    "president of", "capital of", "who won", "how old is", "what year",
+    "football", "election", "stock price", "translate this to",
 ]
 
 _INJECTION_MSG = (
