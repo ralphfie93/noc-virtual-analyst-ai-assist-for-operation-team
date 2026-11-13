@@ -205,14 +205,23 @@ class AnalystBackend:
     async def _ask(self, text, session_id):
         from google.genai import types
         content = types.Content(role="user", parts=[types.Part.from_text(text=text)])
-        chunks = []
+        final_chunks, last_text, err = [], "", None
         async for event in self.runner.run_async(
                 user_id=USER_ID, session_id=session_id, new_message=content):
-            if event.is_final_response() and event.content and event.content.parts:
+            if getattr(event, "error_message", None):
+                err = event.error_message
+            if event.content and event.content.parts:
                 for part in event.content.parts:
                     if getattr(part, "text", None):
-                        chunks.append(part.text)
-        return "".join(chunks).strip() or "(no response)"
+                        last_text = part.text
+                        if event.is_final_response():
+                            final_chunks.append(part.text)
+        answer = "".join(final_chunks).strip() or last_text.strip()
+        if answer:
+            return answer
+        if err:
+            return f"⚠️ The model returned an error: {err}"
+        return "⚠️ No response was produced. (Possible rate limit or tool timeout — try again.)"
 
     def ensure_session(self, session_id):
         try:
