@@ -14,7 +14,6 @@ import sqlite3
 import uuid
 from datetime import datetime
 
-import pandas as pd
 import streamlit as st
 
 import mcp_server  # in-process read-only helpers for charts / schema inspector
@@ -54,14 +53,14 @@ st.markdown(
         max-width:54ch; margin:0 auto 1.5rem; }
 
       .st-key-welcomebox [data-baseweb="input"],
-      .st-key-welcomebox [data-baseweb="base-input"] { border-radius:16px !important; }
+      .st-key-welcomebox [data-baseweb="base-input"] { border-radius:14px !important;
+        box-shadow:0 6px 18px rgba(2,6,23,.06) !important; }
       .st-key-welcomebox input {
-        padding:15px 16px !important; font-size:1rem !important;
-        border-radius:16px !important; box-shadow:0 8px 24px rgba(2,6,23,.07) !important; }
+        padding:10px 14px !important; font-size:0.98rem !important; border-radius:14px !important; }
       .st-key-welcomebox button {
-        border-radius:14px !important; background:var(--accent) !important;
-        color:#fff !important; font-weight:700 !important; font-size:1.15rem !important;
-        height:3.05rem; padding:0 !important; box-shadow:0 8px 24px rgba(91,91,214,.25); }
+        border-radius:14px !important; background:var(--accent) !important; color:#fff !important;
+        font-weight:700 !important; font-size:1.05rem !important;
+        height:42px !important; min-height:42px !important; padding:0 !important; }
 
       .st-key-cards button {
         border:1px solid var(--line) !important; border-radius:16px !important;
@@ -83,6 +82,10 @@ st.markdown(
 
       [data-testid="stSidebar"] { background:rgba(255,255,255,.72);
         backdrop-filter:blur(8px); border-right:1px solid var(--line); }
+      [data-testid="stSidebarUserContent"] { position:relative;
+        min-height: calc(100vh - 90px); padding-bottom: 7rem; }
+      [data-testid="stLayoutWrapper"]:has(> .st-key-railbottom) {
+        position:absolute; bottom:0; left:0; right:0; }
       [data-testid="stSidebar"] .stButton button { text-align:left !important;
         justify-content:flex-start !important; border-radius:10px !important;
         font-weight:500 !important; }
@@ -129,46 +132,8 @@ def get_backend():
 
 
 # --------------------------------------------------------------------------- #
-# 3. Read-only DB helpers (charts + schema inspector)
+# 3. Read-only DB helper (schema inspector)
 # --------------------------------------------------------------------------- #
-CHART_CONFIG = {
-    "idirect_performance": ("remote_id",
-        ["downstream_snr_db", "clearsky_snr_db", "latency_rtt_ms", "tx_power_dbm",
-         "utilization_pct"]),
-    "jupiter_performance": ("terminal_san",
-        ["sqf", "clearsky_sqf", "latency_rtt_ms", "temperature_c", "utilization_pct"]),
-    "starlink_performance": ("terminal_id",
-        ["pop_ping_latency_ms", "pop_ping_drop_rate", "fraction_obstructed_pct",
-         "utilization_pct"]),
-    "hub_components": ("component_id",
-        ["cpu_pct", "agg_throughput_mbps", "temperature_c"]),
-}
-
-
-@st.cache_data(show_spinner=False)
-def list_entities(table: str, id_col: str):
-    conn = mcp_server._connect_ro()
-    try:
-        return [r[0] for r in conn.execute(
-            f"SELECT DISTINCT {id_col} FROM {table} ORDER BY {id_col}").fetchall()]
-    finally:
-        conn.close()
-
-
-@st.cache_data(show_spinner=False)
-def chart_frame(table: str, id_col: str, entity: str, metrics: tuple):
-    cols = ", ".join(["timestamp_myt", *metrics])
-    conn = mcp_server._connect_ro()
-    try:
-        df = pd.read_sql_query(
-            f"SELECT {cols} FROM {table} WHERE {id_col} = ? ORDER BY timestamp_myt",
-            conn, params=[entity])
-    finally:
-        conn.close()
-    df["timestamp_myt"] = pd.to_datetime(df["timestamp_myt"])
-    return df.set_index("timestamp_myt").replace(9999.0, pd.NA)
-
-
 def schema_text() -> str:
     import json
     lines = []
@@ -317,22 +282,13 @@ def settings_dialog():
 
 @st.dialog("🛠️ Tools", width="large")
 def tools_dialog():
-    t1, t2, t3, t4 = st.tabs(["📈 Charts", "🔧 Migration", "🗄️ Schema", "💰 Cost"])
+    t1, t2, t3 = st.tabs(["🔧 Migration", "🗄️ Schema", "💰 Cost"])
     with t1:
-        c1, c2 = st.columns(2)
-        table = c1.selectbox("System table", list(CHART_CONFIG.keys()))
-        id_col, metrics = CHART_CONFIG[table]
-        entity = c2.selectbox(id_col, list_entities(table, id_col))
-        chosen = st.multiselect("Metrics", metrics, default=metrics[:2])
-        if entity and chosen:
-            df = chart_frame(table, id_col, entity, tuple(chosen))
-            st.line_chart(df[list(chosen)])
-            st.caption(f"{len(df):,} samples · latency timeouts (9999) shown as gaps.")
-    with t2:
         st.caption("Add a table at runtime and watch MCP discover it with zero agent-code "
-                   "change (dynamic discovery).")
+                   "change (dynamic discovery). Then ask: *“what data tables can you query "
+                   "right now?”*")
         if demo_table_exists():
-            st.success(f"`{DEMO_TABLE}` is live. Try: *“what maintenance windows are "
+            st.success(f"`{DEMO_TABLE}` is live. Ask: *“what maintenance windows are "
                        f"scheduled?”*")
             if st.button("Remove demo table", use_container_width=True):
                 drop_demo_table()
@@ -340,9 +296,9 @@ def tools_dialog():
         elif st.button(f"➕ Add `{DEMO_TABLE}` table", use_container_width=True):
             add_demo_table()
             st.rerun()
-    with t3:
+    with t2:
         st.text(schema_text())
-    with t4:
+    with t3:
         snap = COST.snapshot()
         a, b = st.columns(2)
         a.metric("Input tokens", f"{snap['input_tokens']:,}")
@@ -386,15 +342,16 @@ with st.sidebar:
             delete_conversation(cid)
             st.rerun()
 
-    st.divider()
-    snap = COST.snapshot()
-    st.markdown(f"<span class='cost-chip'>💰 ${snap['usd']:.4f} · {snap['calls']} calls"
-                f"</span>", unsafe_allow_html=True)
-    st.write("")
-    if st.button("🛠️  Tools", use_container_width=True):
-        tools_dialog()
-    if st.button("⚙️  Settings", use_container_width=True):
-        settings_dialog()
+    with st.container(key="railbottom"):
+        st.divider()
+        snap = COST.snapshot()
+        st.markdown(f"<span class='cost-chip'>💰 ${snap['usd']:.4f} · {snap['calls']} calls"
+                    f"</span>", unsafe_allow_html=True)
+        st.write("")
+        if st.button("🛠️  Tools", use_container_width=True):
+            tools_dialog()
+        if st.button("⚙️  Settings", use_container_width=True):
+            settings_dialog()
 
 # --------------------------------------------------------------------------- #
 # 9. Welcome (empty) or transcript
@@ -402,23 +359,22 @@ with st.sidebar:
 WELCOME_CARDS = [
     ("📊", "Check iDirect terminal health this week and give an RCA report for any site "
            "with issues"),
-    ("📡", "JUPITER fleet health report — flag and explain any degraded or throttled "
-           "terminals this week"),
-    ("🛰️", "Which Starlink dishes had problems this week, and what caused each?"),
-    ("🔧", "My iDirect terminal shows RX and TX amber — what should I check?"),
+    ("🔧", "My iDirect terminal shows RX and TX amber. What should I check?"),
     ("🌐", "Why can't I get internet from my JUPITER terminal?"),
-    ("🌧️", "STAR-D06 is down per our monitoring — what's the weather at its site?"),
+    ("🌧️", "STAR-D06 is down per our monitoring. What is the weather at its site?"),
+    ("🗄️", "What data tables can you query right now?"),
+    ("🛡️", "Delete the hub_components table."),
 ]
 
 if not messages:
     hour = datetime.now().hour
     greet = ("Good morning" if hour < 12 else
              "Good afternoon" if hour < 18 else "Good evening")
-    st.markdown(f"<div class='hero-greet'>{greet} — how can I help?</div>",
+    st.markdown(f"<div class='hero-greet'>{greet}, how can I help?</div>",
                 unsafe_allow_html=True)
-    st.markdown(f"<div class='hero-sub'>I'm the {settings['name']}. I read live iDirect, "
-                f"JUPITER and Starlink telemetry, follow the NOC runbooks, and can check "
-                f"site weather — all read-only.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='hero-sub'>I'm the NOC Virtual AI Assistant. I read live "
+                "iDirect, JUPITER HNS and Starlink telemetry, follow the NOC knowledge "
+                "base, and can check site weather.</div>", unsafe_allow_html=True)
 
     with st.container(key="welcomebox"):
         _, mid, _ = st.columns([1, 6, 1])
