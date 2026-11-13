@@ -60,7 +60,8 @@ st.markdown(
         border-radius:16px !important; box-shadow:0 8px 24px rgba(2,6,23,.07) !important; }
       .st-key-welcomebox button {
         border-radius:14px !important; background:var(--accent) !important;
-        color:#fff !important; font-weight:600 !important; }
+        color:#fff !important; font-weight:700 !important; font-size:1.15rem !important;
+        height:3.05rem; padding:0 !important; box-shadow:0 8px 24px rgba(91,91,214,.25); }
 
       .st-key-cards button {
         border:1px solid var(--line) !important; border-radius:16px !important;
@@ -423,9 +424,10 @@ if not messages:
         _, mid, _ = st.columns([1, 6, 1])
         with mid:
             with st.form("welcome_form", clear_on_submit=True, border=False):
-                q = st.text_input("msg", label_visibility="collapsed",
-                                  placeholder=f"Message {settings['name']}…")
-                sent = st.form_submit_button("Ask", use_container_width=True)
+                ic1, ic2 = st.columns([0.87, 0.13], vertical_alignment="bottom")
+                q = ic1.text_input("msg", label_visibility="collapsed",
+                                   placeholder=f"Message {settings['name']}…")
+                sent = ic2.form_submit_button("➤", use_container_width=True)
             if sent and q and q.strip():
                 st.session_state.pending = q.strip()
                 st.rerun()
