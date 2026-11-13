@@ -113,23 +113,27 @@ measured for cost, and the very same setup is what the automatic evaluation grad
 
 ---
 
-## How it works (the pieces behind the diagram)
+## How it works (the six capstone pillars)
 
-**The agents.** There is one root coordinator plus three platform specialists and a weather
-checker. The coordinator reads the question, works out which platform it is about, and hands it
-to just that one specialist instead of waking all of them. This keeps answers fast and cheap.
-For example, "Why is IDR-R03 degraded?" goes only to the iDirect specialist, while a question
-that clearly spans everything ("any hub faults across all systems?") may use more than one.
-Each specialist can read both the telemetry and the matching runbook, so it answers the data
-and the procedure in one place.
+This section explains what each piece does in plain language, and names the pillar it satisfies
+and the file it lives in.
 
-**How it reaches the data (MCP).** All data access goes through a small server called the MCP
-server (`mcp_server.py`). It offers five simple tools: list the tables, describe a table, run a
-read query, list the policies, and read a policy. The assistant discovers the tables at runtime
-instead of having them hard coded, so you can add a new table and it can use it right away with
-no code change (this is what the migration demo shows).
+**1. Multiple agents — `agent_core.py`.** There is one root coordinator plus three platform
+specialists and a weather checker. The coordinator reads the question, works out which platform
+it is about, and hands it to just that one specialist instead of waking all of them, which keeps
+answers fast and cheap. For example, "Why is IDR-R03 degraded?" goes only to the iDirect
+specialist, while a question that clearly spans everything ("any hub faults across all systems?")
+may use more than one. Each specialist can read both the telemetry and the matching runbook, so
+it answers the data and the procedure in one place.
 
-**Two layers of safety.** Safety is enforced twice, so one layer backs up the other:
+**2. Enterprise integration with MCP — `mcp_server.py`.** All data access goes through a small
+server called the MCP server. It offers five simple tools: list the tables, describe a table,
+run a read query, list the policies, and read a policy. The assistant discovers the tables at
+runtime instead of having them hard coded, so you can add a new table and it can use it right
+away with no code change (this is what the migration demo shows).
+
+**3. Two layers of safety — `guardrails.py` and `mcp_server.py`.** Safety is enforced twice, so
+one layer backs up the other:
 
 * **Input layer (`guardrails.py`).** Before the question reaches the model, it hides personal
   data (emails, phone numbers, card and ID numbers), blocks prompt injection attempts (for
@@ -139,25 +143,18 @@ no code change (this is what the migration demo shows).
   is parsed and checked so that anything which would change data is rejected, no matter how it
   is worded. No write tool exists at all.
 
-**Cost tracking and evaluation.** Every time the model is called, a callback records the tokens
-used and the estimated cost, shown live in the app. Separately, `eval.py` grades the whole
-assistant automatically with an "LLM as a Judge": it asks a set of known test questions, then a
-second model scores each answer from 1 to 5 against the expected facts. The latest run scores a
-perfect 5.00 (see the benchmark below).
+**4. Observability and cost — `guardrails.py`.** Every time the model is called, a callback
+records the tokens used and the estimated cost, shown live in the sidebar and in the
+Tools → Cost tab.
 
----
+**5. Automatic evaluation — `eval.py` with `capstone_golden.json`.** The assistant is graded
+automatically with an "LLM as a Judge": it asks a set of known test questions, then a second
+model scores each answer from 1 to 5 against the expected facts. The latest run scores a perfect
+5.00 (see the benchmark below).
 
-## The six capstone pillars
-
-| Pillar | Where it lives |
-|---|---|
-| 1. Multiple agents | `agent_core.py`: root coordinator that routes to the iDirect, JUPITER and Starlink specialists plus weather |
-| 2. Enterprise integration (MCP) | `mcp_server.py`: database and runbooks served through the MCP tools |
-| 3. Input guardrails | `guardrails.py`: PII masking, prompt injection and off topic blocking |
-| 3. Data guardrails | `mcp_server.py`: `is_sql_mutation` check plus read only connection |
-| 4. Observability and cost | `guardrails.py` cost callback, shown in the sidebar and the Tools → Cost tab |
-| 5. Evaluation harness | `eval.py` with `capstone_golden.json` (LLM as a Judge, scored 1 to 5) |
-| 6. Deployment | `app.py`, `requirements.txt`, `st.secrets`, Streamlit Community Cloud |
+**6. Deployment — `app.py`, `requirements.txt`, `st.secrets`.** The app runs on Streamlit
+Community Cloud, with the Gemini key stored in Streamlit secrets, and the MCP server running as
+a subprocess inside the same container.
 
 ---
 
