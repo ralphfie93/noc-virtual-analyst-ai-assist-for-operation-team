@@ -123,7 +123,8 @@ if not os.environ.get("GOOGLE_API_KEY"):
     st.stop()
 
 from agent_core import AnalystBackend  # noqa: E402
-from guardrails import COST            # noqa: E402
+# Cost totals are read via the backend (backend.cost_snapshot()) so the UI reads the
+# SAME tracker the model callbacks write to — no risk of a second module instance.
 
 
 @st.cache_resource(show_spinner="Starting the NOC Assistant…")
@@ -299,14 +300,14 @@ def tools_dialog():
     with t2:
         st.text(schema_text())
     with t3:
-        snap = COST.snapshot()
+        snap = get_backend().cost_snapshot()
         a, b = st.columns(2)
         a.metric("Input tokens", f"{snap['input_tokens']:,}")
         b.metric("Output tokens", f"{snap['output_tokens']:,}")
         a.metric("Model calls", snap["calls"])
         b.metric("Est. cost (USD)", f"${snap['usd']:.4f}")
         if st.button("Reset telemetry", use_container_width=True):
-            COST.reset()
+            get_backend().reset_cost()
             st.rerun()
 
 
@@ -344,7 +345,7 @@ with st.sidebar:
 
     with st.container(key="railbottom"):
         st.divider()
-        snap = COST.snapshot()
+        snap = backend.cost_snapshot()
         st.markdown(f"<span class='cost-chip'>💰 ${snap['usd']:.4f} · {snap['calls']} calls"
                     f"</span>", unsafe_allow_html=True)
         st.write("")
@@ -422,6 +423,7 @@ if prompt:
     styled = f"{persona_preamble(settings)}\n\nUser question: {prompt}"
     session_id = st.session_state.current_id            # one ADK session per chat
     backend.ensure_session(session_id)
+    before = backend.cost_snapshot()
     with st.chat_message("assistant", avatar="🛰️"):
         with st.spinner("Working on it — routing, telemetry, runbooks & weather "
                         "(this can take 20–40s)…"):
@@ -430,5 +432,10 @@ if prompt:
             except Exception as exc:  # noqa: BLE001
                 answer = f"⚠️ Error: {exc}"
         st.markdown(answer)
+    after = backend.cost_snapshot()
+    d_calls = after["calls"] - before["calls"]
+    d_usd = after["usd"] - before["usd"]
+    if d_calls > 0:
+        st.toast(f"💰 Tracked {d_calls} model calls · +${d_usd:.4f} this turn")
     messages.append({"role": "assistant", "content": answer})
     st.rerun()

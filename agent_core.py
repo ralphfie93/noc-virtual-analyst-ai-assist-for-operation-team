@@ -23,7 +23,7 @@ import sys
 import threading
 
 from config import BASE_DIR, MCP_SERVER_PATH, MODEL
-from guardrails import after_model_cost_tracker, before_model_guardrail
+from guardrails import COST, after_model_cost_tracker, before_model_guardrail
 
 APP_NAME = "noc_virtual_analyst"
 USER_ID = "noc_operator"
@@ -240,3 +240,10 @@ class AnalystBackend:
 
     def ask(self, text: str, session_id: str = SESSION_ID) -> str:
         return self._submit(self._ask(text, session_id))
+
+    def cost_snapshot(self) -> dict:
+        """Live token/cost totals. Read from the SAME module the callbacks write to."""
+        return COST.snapshot()
+
+    def reset_cost(self) -> None:
+        COST.reset()
