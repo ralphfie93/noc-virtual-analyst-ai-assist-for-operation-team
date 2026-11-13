@@ -1,17 +1,17 @@
 {
-  "description": "Golden test cases for the NOC Virtual Analyst. Facts are grounded in the seeded-incident catalog (Database/README_SCHEMA.md §4) and verified against terminal_ops.db.",
+  "description": "Golden test cases for the multi-system NOC Copilot. Facts are grounded in the seeded-incident catalog (Database/README_SCHEMA.md §4) and verified against terminal_ops.db. Cases span iDirect, JUPITER and Starlink to exercise the coordinator's per-system routing.",
   "cases": [
     {
       "id": "hub-faults-week",
       "category": "data-accuracy",
-      "question": "What hub-side faults occurred this week, and when did each start and end?",
+      "question": "What hub-side faults occurred this week across all systems, and when did each start and end?",
       "key_facts": [
         "IDR-PP-01 (protocol processor) PP_HIGH_CPU around 2026-11-06 03:00 to 04:59",
         "IDR-LC-02 (line card) LC_HW_FAULT around 2026-11-08 11:00 to 12:29",
         "STAR-POP-SIN (PoP) POP_OUTAGE around 2026-11-09 14:00 to 14:39",
         "JUP-IPGW-N1 (IPGW) IPGW_UNREACHABLE around 2026-11-11 09:00 to 09:59"
       ],
-      "expected_behavior": "Lists the four hub faults with component, fault code and approximately correct time windows, grounded in the database."
+      "expected_behavior": "Lists the four hub faults with component, fault code and approximately correct windows, grounded in the database."
     },
     {
       "id": "idirect-linecard-outage",
@@ -20,22 +20,22 @@
       "key_facts": [
         "Four remotes (IDR-R04, R05, R06, R07) went Out of Network together",
         "The shared line card IDR-LC-02 was Down with fault LC_HW_FAULT",
-        "Because many terminals failed together on the same component it is a hub-side fault, not a per-site issue",
+        "Many terminals failing together on the same component = a hub-side fault",
         "Correct action is to escalate (line-card hardware is beyond L1)"
       ],
-      "expected_behavior": "Identifies the common line card, confirms the hub-side fault via the join, scopes it as many-not-one, and recommends escalation."
+      "expected_behavior": "Routes to the iDirect specialist, identifies the common line card, confirms the hub-side fault via the join, scopes it as many-not-one, and recommends escalation."
     },
     {
       "id": "starlink-pop-outage-scope",
       "category": "incident-triage",
-      "question": "Scope the STAR-POP-SIN outage on Nov 9 around 14:00 — was it one dish or many?",
+      "question": "Scope the STAR-POP-SIN outage on Nov 9 around 14:00 — one dish or many?",
       "key_facts": [
         "All five dishes on STAR-POP-SIN (STAR-D01 through STAR-D05) went OFFLINE together",
         "The PoP STAR-POP-SIN was Down with fault POP_OUTAGE from about 14:00 to 14:39",
-        "It is a shared-PoP outage (many terminals), not a single-dish problem",
+        "It is a shared-PoP outage (many dishes), not a single-dish problem",
         "Escalate as a PoP/ground-segment outage"
       ],
-      "expected_behavior": "Determines that many dishes on the same PoP failed simultaneously, ties it to the POP_OUTAGE, and classifies it as a hub/PoP-side incident to escalate."
+      "expected_behavior": "Routes to the Starlink specialist, determines many dishes on the same PoP failed together, ties it to POP_OUTAGE, and classifies it as a hub/PoP-side incident to escalate."
     },
     {
       "id": "jupiter-rainfade-weather",
@@ -43,11 +43,11 @@
       "question": "Is JUP-T02's signal dip on Nov 6 around 15:00 rain fade? Check the weather at its site.",
       "key_facts": [
         "JUP-T02 SQF dipped well below its clear-sky baseline transiently and recovered on its own",
-        "The signature (transient SQF drop, frames_with_no_signal rising, self-recovery) is consistent with Ka-band rain fade",
-        "The assistant should consult current weather for the terminal's site to corroborate",
+        "The signature (transient SQF drop, frames_with_no_signal rising, self-recovery) fits Ka-band rain fade",
+        "The assistant should check current weather for the terminal's site to corroborate",
         "It is a single-terminal, weather-driven event, not a hub fault"
       ],
-      "expected_behavior": "Recognizes the rain-fade signature, invokes the weather check for the site, and concludes it is a transient single-site weather event (does not fabricate weather)."
+      "expected_behavior": "Routes to JUPITER (and weather), recognizes the rain-fade signature, checks weather, and concludes a transient single-site weather event (does not fabricate weather)."
     },
     {
       "id": "jupiter-fap-throttle-nuance",
@@ -57,9 +57,9 @@
         "JUP-T07 data_allowance_state is FAP_Throttled from about Nov 9 12:00 onward",
         "Throughput collapses to roughly 1-2 Mbps",
         "SQF is normal and state_code is OK — the signal/hardware is fine",
-        "This is a data-allowance (fair-access policy) throttle, not a fault — not an L1 hardware issue"
+        "This is a data-allowance (fair-access) throttle, not a fault"
       ],
-      "expected_behavior": "Distinguishes an allowance/FAP throttle (healthy signal, capped throughput) from a real fault, and does not misdiagnose it as an outage."
+      "expected_behavior": "Routes to JUPITER, distinguishes an allowance/FAP throttle (healthy signal, capped throughput) from a real fault, and does not misdiagnose it as an outage."
     },
     {
       "id": "guardrail-sql-injection",

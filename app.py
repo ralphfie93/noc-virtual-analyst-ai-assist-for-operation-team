@@ -4,15 +4,9 @@ app.py — NOC Copilot (AI Assist for the Operations Team).
 A production-grade multi-agent assistant for satellite network operations,
 built on Google ADK + MCP + Streamlit. See README.md for the architecture summary.
 
-UI: a Copilot-inspired console — conversation history in the left rail, a clean
-centered chat, suggestion starters, a Tools menu, and a Settings modal (personality).
-
-Pillars wired here:
-  1. Multi-agent  — coordinator + telemetry / runbook / weather specialists (agent_core)
-  2. Enterprise integration — real stdio MCP server (mcp_server.py) via McpToolset
-  3. Guardrails   — input tier (guardrails.py) + data tier (mcp_server.py)
-  4. Cost telemetry — after_model_cost_tracker on every agent, shown in the Tools menu
-  6. Deployment   — st.secrets, requirements.txt, Streamlit Community Cloud
+UI: a Microsoft Copilot-inspired console — aurora gradient, a floating chat panel,
+a centered welcome with a big input and suggestion cards, conversation history in the
+left rail, a Tools menu and a Settings modal (assistant personality).
 """
 
 import os
@@ -29,82 +23,90 @@ from config import DB_PATH, MODEL
 # --------------------------------------------------------------------------- #
 # 1. Page config + styling
 # --------------------------------------------------------------------------- #
-st.set_page_config(
-    page_title="NOC Copilot",
-    page_icon="🛰️",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="NOC Copilot", page_icon="🛰️", layout="wide",
+                   initial_sidebar_state="expanded")
 
 st.markdown(
     """
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-      :root {
-        --accent:#4F46E5; --accent-soft:#EEF0FF; --ink:#0F172A; --muted:#64748B;
-        --line:#E8E8EF; --surface:#FFFFFF; --panel:#FAFAFC;
-        --ok:#16A34A; --warn:#D97706; --crit:#DC2626;
-      }
+      :root { --accent:#5B5BD6; --accent-soft:#EEF0FF; --ink:#1A1A2E; --muted:#6B7280;
+              --line:#ECECF3; --panel:#FAFAFC; }
       html, body, [class*="css"], .stMarkdown, .stButton button, input, textarea {
-        font-family:'Inter', system-ui, sans-serif !important;
-      }
+        font-family:'Inter', system-ui, sans-serif !important; }
       #MainMenu, footer { visibility:hidden; height:0; }
-      .block-container { max-width: 820px; padding-top: 2.6rem; padding-bottom: 7rem; }
 
-      /* Hero */
-      .hero-greet { font-size:2.2rem; font-weight:700; color:var(--ink);
-        letter-spacing:-0.02em; margin:0.2rem 0 0.35rem; }
-      .hero-sub { color:var(--muted); font-size:1.05rem; line-height:1.5;
-        max-width:60ch; margin-bottom:1.6rem; }
+      /* Aurora gradient behind everything */
+      .stApp { background: linear-gradient(135deg,#E9EDFF 0%,#F3EBFF 28%,#FDEBF4 55%,
+               #EAF2FF 80%,#EFEBFF 100%); }
+      [data-testid="stAppViewContainer"], [data-testid="stMain"],
+      [data-testid="stHeader"] { background: transparent !important; }
 
-      /* Suggestion starters — soft, airy, with a leading glyph (scoped) */
-      .st-key-suggestions button {
+      /* Floating white panel for the main content */
+      [data-testid="stMain"] .block-container {
+        background:#FFFFFF; border-radius:26px; border:1px solid rgba(2,6,23,.05);
+        box-shadow:0 20px 60px rgba(91,91,214,.12); max-width:900px;
+        margin-top:1.4rem; margin-bottom:2rem; padding:2rem 2.6rem 2.6rem; }
+
+      /* Hero (centered) */
+      .hero-greet { text-align:center; font-size:2.35rem; font-weight:700; color:var(--ink);
+        letter-spacing:-0.02em; margin:1.2rem 0 .4rem; }
+      .hero-sub { text-align:center; color:var(--muted); font-size:1.02rem; line-height:1.5;
+        max-width:54ch; margin:0 auto 1.5rem; }
+
+      /* Centered welcome input */
+      .st-key-welcomebox [data-baseweb="input"],
+      .st-key-welcomebox [data-baseweb="base-input"] { border-radius:16px !important; }
+      .st-key-welcomebox input {
+        padding:15px 16px !important; font-size:1rem !important;
+        border-radius:16px !important; box-shadow:0 8px 24px rgba(2,6,23,.07) !important; }
+      .st-key-welcomebox button {
+        border-radius:14px !important; background:var(--accent) !important;
+        color:#fff !important; font-weight:600 !important; }
+
+      /* Suggestion cards */
+      .st-key-cards button {
         border:1px solid var(--line) !important; border-radius:16px !important;
-        background:var(--panel) !important; color:var(--ink) !important;
-        padding:15px 16px !important; min-height:58px; font-weight:500 !important;
-        justify-content:flex-start !important; text-align:left !important;
-        box-shadow:none !important; transition:transform .12s ease, border-color .12s ease, background .12s ease;
-      }
-      .st-key-suggestions button:hover {
-        border-color:var(--accent) !important; background:var(--surface) !important;
-        transform:translateY(-2px);
-      }
-      .st-key-suggestions button p { text-align:left !important; width:100%; margin:0; }
+        background:var(--panel) !important; color:var(--ink) !important; padding:16px !important;
+        min-height:76px; font-weight:500 !important; justify-content:flex-start !important;
+        text-align:left !important; box-shadow:none !important;
+        transition:transform .12s ease,border-color .12s ease,background .12s ease; }
+      .st-key-cards button:hover { border-color:var(--accent) !important;
+        background:#fff !important; transform:translateY(-2px); }
+      .st-key-cards button p { text-align:left !important; width:100%; margin:0; }
 
-      /* Chat input */
-      [data-testid="stChatInput"] { border-radius:24px !important; }
-
-      /* Chat messages — gentle bubbles */
-      [data-testid="stChatMessage"] { padding:2px 0 6px; }
+      /* Bottom chat input pill */
+      [data-testid="stChatInput"] { border-radius:24px !important;
+        box-shadow:0 8px 24px rgba(2,6,23,.07); }
 
       /* Cost chip */
       .cost-chip { display:inline-block; padding:5px 12px; border-radius:999px;
         background:var(--accent-soft); color:var(--accent); font-size:0.8rem;
         font-weight:600; white-space:nowrap; }
 
-      /* Sidebar conversation rail */
-      [data-testid="stSidebar"] { background:var(--panel); border-right:1px solid var(--line); }
-      [data-testid="stSidebar"] .stButton button {
-        text-align:left !important; justify-content:flex-start !important;
-        border-radius:10px !important; font-weight:500 !important;
-      }
-      .rail-title { font-size:1.15rem; font-weight:700; color:var(--ink); margin:0.2rem 0 0.1rem; }
-      .rail-sub { color:var(--muted); font-size:0.78rem; margin-bottom:0.6rem; }
-      .rail-head { color:var(--muted); font-size:0.72rem; font-weight:600;
-        letter-spacing:0.04em; margin:0.8rem 0 0.3rem; }
+      /* Sidebar */
+      [data-testid="stSidebar"] { background:rgba(255,255,255,.72);
+        backdrop-filter:blur(8px); border-right:1px solid var(--line); }
+      [data-testid="stSidebar"] .stButton button { text-align:left !important;
+        justify-content:flex-start !important; border-radius:10px !important;
+        font-weight:500 !important; }
+      .rail-title { font-size:1.15rem; font-weight:700; color:var(--ink); margin:.2rem 0 .1rem; }
+      .rail-sub { color:var(--muted); font-size:.78rem; margin-bottom:.6rem; }
+      .rail-head { color:var(--muted); font-size:.72rem; font-weight:600;
+        letter-spacing:.04em; margin:.8rem 0 .3rem; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # --------------------------------------------------------------------------- #
-# 2. Secrets / API key resolution (st.secrets -> env; force Gemini Dev API)
+# 2. Secrets / API key resolution
 # --------------------------------------------------------------------------- #
 api_key = ""
 try:
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
-except Exception:  # noqa: BLE001 - no secrets.toml locally is fine
+except Exception:  # noqa: BLE001
     api_key = ""
 api_key = api_key or os.environ.get("GOOGLE_API_KEY", "")
 if api_key:
@@ -186,7 +188,7 @@ def schema_text() -> str:
 
 
 # --------------------------------------------------------------------------- #
-# 4. Live Migration Simulator (zero-code schema evolution)
+# 4. Live Migration Simulator
 # --------------------------------------------------------------------------- #
 DEMO_TABLE = "maintenance_windows"
 
@@ -228,7 +230,7 @@ def demo_table_exists() -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# 5. Personality
+# 5. Personality + conversation state
 # --------------------------------------------------------------------------- #
 TONE_DIRECTIVES = {
     "Concise L1": "Be terse and operational; lead with the answer, minimal prose.",
@@ -237,15 +239,11 @@ TONE_DIRECTIVES = {
     "Formal Report": "Write formally and structured, report-style, with clear headings.",
     "Custom": None,
 }
-VERBOSITY_DIRECTIVES = {
-    "Brief": "Keep the answer very short.",
-    "Balanced": "Use a moderate length.",
-    "Detailed": "Be comprehensive.",
-}
-DEFAULT_SETTINGS = {
-    "name": "NOC Copilot", "tone": "Concise L1", "custom": "",
-    "verbosity": "Balanced", "emoji": True,
-}
+VERBOSITY_DIRECTIVES = {"Brief": "Keep the answer very short.",
+                        "Balanced": "Use a moderate length.",
+                        "Detailed": "Be comprehensive."}
+DEFAULT_SETTINGS = {"name": "NOC Copilot", "tone": "Concise L1", "custom": "",
+                    "verbosity": "Balanced", "emoji": True}
 
 
 def persona_preamble(s: dict) -> str:
@@ -256,9 +254,6 @@ def persona_preamble(s: dict) -> str:
             f"Tone: {tone} Verbosity: {VERBOSITY_DIRECTIVES[s['verbosity']]} {emoji}]")
 
 
-# --------------------------------------------------------------------------- #
-# 6. Conversation state (chat history)
-# --------------------------------------------------------------------------- #
 def new_conversation():
     cid = uuid.uuid4().hex[:8]
     st.session_state.conversations[cid] = {
@@ -281,7 +276,7 @@ messages = convo["messages"]
 
 
 # --------------------------------------------------------------------------- #
-# 7. Settings + Tools modals
+# 6. Settings + Tools modals
 # --------------------------------------------------------------------------- #
 @st.dialog("⚙️ Assistant settings")
 def settings_dialog():
@@ -350,7 +345,7 @@ def tools_dialog():
 
 
 # --------------------------------------------------------------------------- #
-# 8. Sidebar — conversation history rail
+# 7. Sidebar — conversation history rail
 # --------------------------------------------------------------------------- #
 backend = get_backend()
 
@@ -361,19 +356,17 @@ with st.sidebar:
     if st.button("➕  New chat", use_container_width=True, type="primary"):
         new_conversation()
         st.rerun()
-
     st.markdown("<div class='rail-head'>RECENT</div>", unsafe_allow_html=True)
     for cid, c in sorted(st.session_state.conversations.items(),
                          key=lambda kv: kv[1]["created"], reverse=True):
         active = cid == st.session_state.current_id
-        label = ("💬  " + (c["title"][:30] + "…" if len(c["title"]) > 30 else c["title"]))
-        if st.button(label, key=f"conv_{cid}", use_container_width=True,
-                     type="secondary", disabled=active):
+        label = "💬  " + (c["title"][:30] + "…" if len(c["title"]) > 30 else c["title"])
+        if st.button(label, key=f"conv_{cid}", use_container_width=True, disabled=active):
             st.session_state.current_id = cid
             st.rerun()
 
 # --------------------------------------------------------------------------- #
-# 9. Top actions (right-aligned)
+# 8. Top actions (right-aligned)
 # --------------------------------------------------------------------------- #
 _, actions = st.columns([0.5, 0.5])
 with actions:
@@ -388,31 +381,39 @@ with actions:
         settings_dialog()
 
 # --------------------------------------------------------------------------- #
-# 10. Welcome (empty) or transcript
+# 9. Welcome (empty) or transcript
 # --------------------------------------------------------------------------- #
-SUGGESTED = [
-    ("📊", "Give me a network health summary"),
-    ("🚨", "What incidents happened this week?"),
-    ("🛰️", "Help me troubleshoot a terminal that's offline"),
-    ("📉", "Which terminals had weak or dropping signal?"),
-    ("📋", "What should I collect before escalating an outage?"),
-    ("💬", "What can you help me with?"),
+WELCOME_CARDS = [
+    ("📶", "Why is an iDirect remote offline?"),
+    ("🌧️", "JUPITER slow — rain fade or data cap?"),
+    ("🛰️", "Did Starlink dishes drop together?"),
 ]
 
 if not messages:
     hour = datetime.now().hour
     greet = ("Good morning" if hour < 12 else
              "Good afternoon" if hour < 18 else "Good evening")
-    st.markdown(f"<div class='hero-greet'>{greet} 👋</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='hero-sub'>I'm {settings['name']}. I read live terminal and "
-                f"hub telemetry, follow the NOC runbooks, and can check site weather — "
-                f"all read-only. What are we looking at today?</div>",
+    st.markdown(f"<div class='hero-greet'>{greet} — how can I help?</div>",
                 unsafe_allow_html=True)
-    with st.container(key="suggestions"):
-        cols = st.columns(2)
-        for i, (icon, text) in enumerate(SUGGESTED):
-            if cols[i % 2].button(f"{icon}  {text}", key=f"sg_{i}",
-                                  use_container_width=True):
+    st.markdown(f"<div class='hero-sub'>I'm {settings['name']}. I read live iDirect, JUPITER "
+                f"and Starlink telemetry, follow the NOC runbooks, and can check site weather "
+                f"— all read-only.</div>", unsafe_allow_html=True)
+
+    with st.container(key="welcomebox"):
+        _, mid, _ = st.columns([1, 6, 1])
+        with mid:
+            with st.form("welcome_form", clear_on_submit=True, border=False):
+                q = st.text_input("msg", label_visibility="collapsed",
+                                  placeholder="Message NOC Copilot…")
+                sent = st.form_submit_button("Ask", use_container_width=True)
+            if sent and q and q.strip():
+                st.session_state.pending = q.strip()
+                st.rerun()
+
+    with st.container(key="cards"):
+        ccols = st.columns(3)
+        for i, (icon, text) in enumerate(WELCOME_CARDS):
+            if ccols[i].button(f"{icon}  {text}", key=f"sg_{i}", use_container_width=True):
                 st.session_state.pending = text
                 st.rerun()
 else:
@@ -422,12 +423,12 @@ else:
             st.markdown(m["content"])
 
 # --------------------------------------------------------------------------- #
-# 11. Input handling
+# 10. Input handling
 # --------------------------------------------------------------------------- #
 prompt = None
 if st.session_state.get("pending"):
     prompt = st.session_state.pop("pending")
-else:
+elif messages:
     typed = st.chat_input(f"Message {settings['name']}…")
     if typed:
         prompt = typed
@@ -440,8 +441,8 @@ if prompt:
         st.markdown(prompt)
     styled = f"{persona_preamble(settings)}\n\nUser question: {prompt}"
     with st.chat_message("assistant", avatar="🛰️"):
-        with st.spinner("Coordinating specialists — telemetry, runbooks & weather "
-                        "(this can take 20–40s)…"):
+        with st.spinner("Coordinating specialists — routing, telemetry, runbooks & "
+                        "weather (this can take 20–40s)…"):
             try:
                 answer = backend.ask(styled)
             except Exception as exc:  # noqa: BLE001
@@ -451,7 +452,7 @@ if prompt:
     st.rerun()
 
 # --------------------------------------------------------------------------- #
-# 12. Incident-report export (under the last answer)
+# 11. Incident-report export
 # --------------------------------------------------------------------------- #
 if messages and messages[-1]["role"] == "assistant":
     last_user = next((m["content"] for m in reversed(messages)

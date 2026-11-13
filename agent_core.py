@@ -1,13 +1,19 @@
 """
-agent_core.py — The multi-agent stack, shared by the Streamlit app and the eval
-harness so both exercise the IDENTICAL agent (no drift between demo and benchmark).
+agent_core.py — The agent stack, shared by the Streamlit app and the eval harness so
+both exercise the IDENTICAL agent (no drift between demo and benchmark).
 
-Contains:
-  * agent instructions
-  * the MCP toolset factory (stdio subprocess -> read-only SQLite + runbooks)
-  * build_coordinator()  — coordinator + telemetry / runbook / weather specialists
-  * AnalystBackend       — a persistent asyncio loop that keeps the MCP subprocess
-                           sessions alive and runs one query to completion.
+Architecture: a ROOT coordinator that ROUTES each question to the ONE relevant
+per-system specialist (so a question about iDirect only wakes the iDirect agent, etc.),
+plus a weather specialist used only when weather/rain-fade is implicated:
+
+  * idirect_analyst   — iDirect remotes + iDirect hub  (telemetry + idirect runbook)
+  * jupiter_analyst   — JUPITER terminals + Ka hub      (telemetry + jupiter runbook)
+  * starlink_analyst  — Starlink dishes + PoP hub       (telemetry + starlink runbook)
+  * weather_checker   — current site weather via built-in google_search
+
+Each system specialist has both the MCP SQL tools and the MCP policy tools, so it can
+answer data + procedure for its system in one place. The root owns the input guardrail;
+every agent reports cost via after_model_callback. MCP discovery stays dynamic.
 
 No Streamlit dependency here on purpose.
 """
@@ -23,101 +29,93 @@ APP_NAME = "noc_virtual_analyst"
 USER_ID = "noc_operator"
 SESSION_ID = "noc_session_001"
 
+SYSTEM_TOOLS = ["mcp_list_tables", "mcp_describe_table", "mcp_read_query",
+                "mcp_list_policies", "mcp_read_policy"]
+
 # --------------------------------------------------------------------------- #
-# Instructions
+# Shared data rules + per-system specifics
 # --------------------------------------------------------------------------- #
-TELEMETRY_INSTR = """You are the Telemetry Analyst for a satellite NOC. You answer by
-querying a read-only SQLite telemetry database through MCP tools.
+_COMMON = """EFFICIENCY (minimise tool calls): you already know your system's tables (named
+below) — go STRAIGHT to mcp_read_query with ONE read-only SELECT; do NOT call mcp_list_tables
+or mcp_describe_table unless a query errors or you must find a NEW table. Read your runbook
+with mcp_read_policy ONLY when the question needs procedure, root-cause ranking, codes, L1
+boundaries or escalation — SKIP it for pure data lookups. Prefer a single combined query over
+several.
 
-WORKFLOW
-- Discover the schema dynamically: call mcp_list_tables, then mcp_describe_table on the
-  tables you need. Do NOT assume columns — verify them.
-- Run queries with mcp_read_query using a single read-only SELECT. Mutations are blocked.
+timestamp_myt is TEXT 'YYYY-MM-DD HH:MM:00' (MYT) and sorts lexicographically — use string
+BETWEEN for ranges. latency 9999.0 = TIMEOUT (exclude from averages). Aggregate hourly for
+trends; keep result sets small. When you do read the runbook, answer ONLY from it (never
+invent codes/thresholds). Return concrete figures; say whether an issue is single-site or a
+hub-side fault that must ESCALATE."""
 
-DATA RULES
-- timestamp_myt is TEXT 'YYYY-MM-DD HH:MM:00' in MYT; it sorts lexicographically, so use
-  string BETWEEN for time ranges.
-- latency 9999.0 means TIMEOUT, not a real RTT — exclude it from averages
-  (e.g. WHERE latency_rtt_ms < 9999).
-- Triage on DEVIATION FROM CLEAR-SKY baseline, not absolutes:
-    iDirect: downstream_snr_db vs clearsky_snr_db ; Jupiter: sqf vs clearsky_sqf.
-    Starlink has no SNR — use state, currently_obstructed, fraction_obstructed_pct,
-    pop_ping_drop_rate, pop_ping_latency_ms, and the alerts flags.
-- "One vs many" is the key scoping question: group by the shared component
-  (iDirect line_card/inroute_group/outroute, Jupiter beam/gateway/ipgw, Starlink pop/
-  ground_station). If many terminals degrade together, JOIN hub_components
-  ON component_id = <shared col> AND timestamp_myt = <same minute> to confirm a hub-side
-  fault (status, fault_code, fault_detail).
-- For trends, AGGREGATE (hourly via substr(timestamp_myt,1,13)||':00', AVG/SUM) instead
-  of returning thousands of rows. Keep result sets small (add LIMIT).
+IDIRECT_INSTR = f"""You are the iDirect Analyst (ST Engineering Evolution, GEO Ku). You cover
+iDirect remotes (IDR-R01..R10) in idirect_performance and the iDirect hub in hub_components
+(line cards IDR-LC-*, protocol processors IDR-PP-*, inroute groups, outroutes).
 
-Return concrete figures (values, timestamps, counts). Be concise and factual."""
+{_COMMON}
 
-RUNBOOK_INSTR = """You are a NOC first-level (L1) troubleshooting assistant for satellite
-network operations. You guide L1 operators through first-level checks and tell them
-precisely when and how to escalate.
+iDirect specifics:
+- Triage on deviation: downstream_snr_db vs clearsky_snr_db, upstream_cn_db vs ucp_target_db.
+  tx_power_dbm pinned at tx_max_power_dbm = no headroom (fade/pointing/BUC). Watch
+  network_state (In Network/Acquisition/Out of Network/Fault) and modem_led.
+- One vs many: group by line_card / inroute_group / outroute. If many remotes fail together,
+  JOIN hub_components ON component_id = line_card AND timestamp_myt to confirm a hub fault.
+- Your runbook is idirect-hub-terminal.md."""
 
-Load the right runbook first: call mcp_list_policies, then mcp_read_policy on the file
-for the system in question (idirect-hub-terminal.md, hns-jupiter.md, or starlink.md).
+JUPITER_INSTR = f"""You are the JUPITER Analyst (Hughes, GEO Ka HTS). You cover JUPITER
+terminals (JUP-T01..T10) in jupiter_performance and the Ka hub in hub_components (gateways
+JUP-GW-*, spot beams JUP-BEAM-*, IPGWs JUP-IPGW-*).
 
-GROUND RULES
-- Answer ONLY from the knowledge base. If the KB doesn't cover it, say so and route to
-  escalation — do NOT invent state codes, thresholds, IPs, or commands.
-- State/diagnostic codes vary by model/software. Never assert an exact numeric code as
-  fact unless it is in the KB; otherwise give the code CATEGORY and say to verify against
-  the terminal manual / NMS.
-- Scope every fault first: ONE terminal vs MANY on the same inroute/outroute/line card/
-  beam/gateway. Many together => hub/gateway/space-segment side => escalate.
-- Enforce L1 boundaries: no config edits, no RF/pointing/commissioning, no gateway/line-
-  card/PP actions, no account/billing changes. Those are ESCALATE, not steps.
-- Prefer deviation-from-clear-sky reasoning over absolute signal numbers.
+{_COMMON}
 
-RESPONSE FORMAT
-1. Most-likely cause(s), briefly.
-2. Ordered first-level checks (concrete, safe, one action each).
-3. Escalation trigger + the exact pre-escalation data bundle to collect first.
-Be concise and operational."""
+JUPITER specifics:
+- Triage on deviation: sqf vs clearsky_sqf. state_code categories: 11.x pointing, 12.x
+  degraded, 13.x Tx-radio, 30.x overheating. data_allowance_state = FAP_Throttled means a
+  fair-access throttle (slow but HEALTHY signal — not a fault). latency 9999 = timeout.
+- One vs many: group by beam / gateway / ipgw. If many terminals lose service together, JOIN
+  hub_components ON component_id = ipgw (or gateway/beam) AND timestamp_myt.
+- Your runbook is hns-jupiter.md."""
 
-WEATHER_INSTR = """You are the Weather Checker for a satellite NOC. Ka-band (JUPITER) and,
-to a lesser extent, Ku-band (iDirect) links suffer RAIN FADE, so current weather at a
-terminal's physical site helps confirm or rule out a weather-driven signal drop.
+STARLINK_INSTR = f"""You are the Starlink Analyst (LEO). You cover Starlink dishes
+(STAR-D01..D10) in starlink_performance and the PoP/ground-station hub in hub_components
+(STAR-POP-*, STAR-GS-*).
 
-- You are given a location/site (e.g. Kuala Lumpur, Kuching, Miri, Johor Bahru,
-  Singapore). Use google_search to find the CURRENT weather there.
-- Report a one-line summary (conditions, rain yes/no, intensity if known) and state
-  whether rain fade is a plausible contributor.
-- NEVER fabricate. If search returns nothing useful, say the weather is unavailable and
-  that rain fade cannot be confirmed from weather data."""
+{_COMMON}
 
-COORDINATOR_INSTR = """You are the NOC Virtual Analyst — the coordinator of the
-satellite operations assistant. You help L1 operators triage iDirect, HNS JUPITER and
-Starlink terminals and the hub.
+Starlink specifics:
+- No SNR. Triage on state (CONNECTED/BOOTING/SEARCHING/OFFLINE/STOWED), currently_obstructed,
+  fraction_obstructed_pct, pop_ping_drop_rate, pop_ping_latency_ms, uptime_s (a reset = a
+  reboot), and the alerts flags (obstructed, thermal_throttle, slow_ethernet_speeds, ...).
+- One vs many: group by pop. If many dishes on the same PoP go offline together, JOIN
+  hub_components ON component_id = pop AND timestamp_myt to confirm a PoP outage.
+- Your runbook is starlink.md."""
 
-SCOPE (hard rule)
-- Answer ONLY questions about satellite network operations: terminal/hub telemetry,
-  incidents, troubleshooting, the runbooks, and weather at a terminal site (for rain
-  fade). Politely refuse anything else and redirect to ops topics. Never help with
-  unrelated tasks (coding, trivia, creative writing, etc.).
-- You are strictly READ-ONLY. Never suggest or perform data mutations.
+WEATHER_INSTR = """You are the Weather Checker for a satellite NOC. Rain fade affects Ka-band
+(JUPITER) most, and Ku-band (iDirect) somewhat; heavy weather can also coincide with Starlink
+degradation. Given a location/site, use google_search for the CURRENT weather and report a
+one-line summary plus whether weather is a plausible contributor. NEVER fabricate; if nothing
+useful is found, say weather is unavailable."""
 
-TOOLS (delegate — don't guess)
-- telemetry_analyst: live data / SQL over the telemetry DB (numbers, timelines, counts,
-  deviation-from-clear-sky, one-vs-many scoping, hub JOINs).
-- runbook_advisor: procedures, state/alert code meaning, root causes, L1 boundaries,
-  escalation and the pre-escalation data bundle.
-- weather_checker: current weather at a terminal's site when rain fade is suspected
-  (pass the site/city, which you can get from the telemetry site name).
+ROOT_INSTR = """You are the NOC Copilot — the coordinator of a multi-system satellite
+operations assistant (iDirect, HNS JUPITER, Starlink and the shared hub).
 
-INCIDENT TRIAGE PATTERN (for "why is <terminal> degraded / down at <time>?")
-1. telemetry_analyst: pull the terminal's timeline and deviation from clear-sky.
-2. telemetry_analyst: scope one-vs-many — are peers on the same component affected? If
-   so, JOIN hub_components to check for a hub-side fault.
-3. If a rain-fade signature appears (transient SNR/SQF dip, Tx pinned), ask
-   weather_checker for the site's weather.
-4. runbook_advisor: map the signature to the ranked root cause, first-level checks, and
-   escalation trigger + data bundle.
-5. Synthesize ONE concise, operational answer with concrete figures. State clearly
-   whether this is a single-site issue or a hub/space-segment issue that must escalate."""
+SCOPE (hard rule): answer ONLY satellite network operations questions — telemetry, incidents,
+troubleshooting, runbooks, and site weather. Politely refuse anything else and redirect. You
+are strictly READ-ONLY; never suggest or perform data changes.
+
+ROUTING — this is your main job. Identify the system from the question and delegate to the
+ONE matching specialist; do NOT call the others:
+- iDirect / remote / IDR-* / line card / inroute / outroute  -> idirect_analyst
+- JUPITER / HNS / Hughes / JUP-* / SQF / state code / beam / gateway / IPGW -> jupiter_analyst
+- Starlink / dish / STAR-* / obstruction / PoP / dishy        -> starlink_analyst
+- weather / rain fade at a site -> weather_checker (only when weather is implicated)
+Only when a question is explicitly cross-fleet ("across all systems", "any terminal
+anywhere") may you consult more than one specialist. If the system is ambiguous, ask a brief
+clarifying question instead of calling every agent.
+
+Pass the specialist the full user question. Then synthesise ONE concise, operational answer
+with concrete figures, and state clearly whether the issue is single-site or a hub/space-
+segment fault that must ESCALATE. Lead with the answer."""
 
 
 # --------------------------------------------------------------------------- #
@@ -141,38 +139,48 @@ def make_toolset(tool_filter):
     )
 
 
+def _system_agent(name, description, instruction):
+    from google.adk.agents import Agent
+    return Agent(
+        name=name, model=MODEL, description=description, instruction=instruction,
+        tools=[make_toolset(SYSTEM_TOOLS)],
+        after_model_callback=after_model_cost_tracker,
+    )
+
+
 def build_coordinator():
+    """Return the root coordinator that routes to per-system specialists + weather."""
     from google.adk.agents import Agent
     from google.adk.tools import google_search
     from google.adk.tools.agent_tool import AgentTool
 
-    telemetry = Agent(
-        name="telemetry_analyst", model=MODEL,
-        description="Queries the read-only telemetry database via MCP SQL tools.",
-        instruction=TELEMETRY_INSTR,
-        tools=[make_toolset(["mcp_list_tables", "mcp_describe_table", "mcp_read_query"])],
-        after_model_callback=after_model_cost_tracker,
-    )
-    runbook = Agent(
-        name="runbook_advisor", model=MODEL,
-        description="Answers from the NOC runbooks via MCP policy tools.",
-        instruction=RUNBOOK_INSTR,
-        tools=[make_toolset(["mcp_list_policies", "mcp_read_policy"])],
-        after_model_callback=after_model_cost_tracker,
-    )
+    idirect = _system_agent(
+        "idirect_analyst",
+        "iDirect remotes (IDR-R*) and iDirect hub: line cards, protocol processors, "
+        "inroutes/outroutes. Ku-band, SNR/CN deviation, network_state.",
+        IDIRECT_INSTR)
+    jupiter = _system_agent(
+        "jupiter_analyst",
+        "HNS JUPITER terminals (JUP-T*) and Ka hub: gateways, spot beams, IPGWs. "
+        "SQF, state codes, FAP throttling, rain fade.",
+        JUPITER_INSTR)
+    starlink = _system_agent(
+        "starlink_analyst",
+        "Starlink dishes (STAR-D*) and PoP/ground-station hub. Obstruction, ping drop, "
+        "alerts, PoP outages.",
+        STARLINK_INSTR)
     weather = Agent(
         name="weather_checker", model=MODEL,
-        description="Checks current weather at a terminal site (rain-fade context).",
-        instruction=WEATHER_INSTR,
-        tools=[google_search],
+        description="Current weather at a terminal/dish site (rain-fade / weather context).",
+        instruction=WEATHER_INSTR, tools=[google_search],
         after_model_callback=after_model_cost_tracker,
     )
     return Agent(
         name="noc_coordinator", model=MODEL,
-        description="NOC Virtual Analyst coordinator.",
-        instruction=COORDINATOR_INSTR,
-        tools=[AgentTool(agent=telemetry), AgentTool(agent=runbook),
-               AgentTool(agent=weather)],
+        description="NOC Copilot — routes to per-system specialists.",
+        instruction=ROOT_INSTR,
+        tools=[AgentTool(agent=idirect), AgentTool(agent=jupiter),
+               AgentTool(agent=starlink), AgentTool(agent=weather)],
         before_model_callback=before_model_guardrail,
         after_model_callback=after_model_cost_tracker,
     )
