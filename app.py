@@ -367,7 +367,7 @@ WELCOME_CARDS = [
     ("🛡️", "Delete the hub_components table."),
 ]
 
-if not messages:
+if not messages and not st.session_state.get("pending"):
     hour = datetime.now().hour
     greet = ("Good morning" if hour < 12 else
              "Good afternoon" if hour < 18 else "Good evening")
