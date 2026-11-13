@@ -10,6 +10,103 @@ Built with **Google ADK** (multi-agent), the **Model Context Protocol** (MCP), a
 
 ---
 
+## Problem statement
+
+When an issue arises, the NOC has to **troubleshoot it manually**. For each incident the
+operator stops to **look up the right documentation** — platform guidelines, reference
+runbooks, and the internal case history — before they can decide what to check next. This is
+**slow**, and it does not scale:
+
+- **Every issue is unique.** The same symptom (e.g. "terminal degraded") can have very
+  different causes and therefore very different troubleshooting steps depending on the
+  platform (iDirect / JUPITER / Starlink), the component, and the conditions at the time.
+- **The knowledge is scattered.** Correct next steps live across several documents plus the
+  live telemetry; an L1 operator has to read, cross-reference, and interpret all of it under
+  time pressure, often during an active outage.
+- **It depends on experience.** Senior engineers do this quickly from memory; newer L1 staff
+  spend far longer, and the quality of the first response varies from person to person.
+
+We have already **documented the known issues case-by-case** (the runbooks / knowledge base),
+but a human still has to find the relevant case, match it to what the telemetry is showing,
+and work out whether it is a single-site problem or a hub-side fault. That lookup-and-correlate
+step is the bottleneck we want to remove.
+
+## Objective
+
+Build an **AI-powered Virtual NOC Assistant** (chatbot) that gives L1 operators a **fast,
+grounded first response** to any terminal issue, so triage no longer depends on manually
+hunting through documentation.
+
+Given a plain-language question, the assistant will:
+
+1. **Detect & scope the issue faster** — query the operational **database** directly to see
+   what the telemetry is actually doing, and determine whether it is a single terminal or a
+   shared hub/space-segment fault (many terminals failing together).
+2. **Provide an RCA and the next-step solution** — grounded **only** in the documented
+   **knowledge base** (runbooks), so the recommended actions, fault codes, and L1-vs-escalate
+   boundaries are consistent with approved procedure instead of model guesswork.
+3. **Route intelligently** — send each question to the correct platform specialist
+   (iDirect / JUPITER / Starlink) and pull in **site weather** when rain-fade is implicated.
+4. **Stay safe and auditable** — read-only access to data, input guardrails (PII masking,
+   prompt-injection and off-topic blocking), and per-answer **cost/latency observability**.
+
+**Outcome:** faster detection, a consistent first-response quality regardless of who is on
+shift, and less time lost to documentation lookup during incidents — while keeping a human in
+the loop (the assistant advises; it never changes anything).
+
+---
+
+## Block diagram — overall architecture
+
+```mermaid
+flowchart TD
+    OP["👩‍💻 NOC L1 Operator"] -->|plain-language question| UI["Streamlit Chat UI<br/>(app.py) · per-chat memory"]
+
+    UI --> GR1{"🛡️ Input Guardrail<br/>(before_model_callback)<br/>PII mask · injection · off-topic"}
+    GR1 -->|blocked| UI
+    GR1 -->|allowed| ROOT["🧭 Root Coordinator<br/>(Google ADK) — routes by platform"]
+
+    ROOT -->|iDirect| A1["iDirect Analyst"]
+    ROOT -->|JUPITER| A2["JUPITER Analyst"]
+    ROOT -->|Starlink| A3["Starlink Analyst"]
+    ROOT -->|weather / rain-fade| W["🌧️ Weather Checker<br/>(Google Search grounding)"]
+
+    A1 --> MCP
+    A2 --> MCP
+    A3 --> MCP
+
+    subgraph DATA["🔌 Enterprise integration (MCP server · stdio subprocess)"]
+        MCP["mcp_server.py<br/>5 discovery tools:<br/>list / describe / read_query / list / read_policy"]
+        GR2{"🛡️ Data Guardrail<br/>read-only URI · sqlparse AST<br/>blocks any mutation/DDL"}
+        MCP --> GR2
+        GR2 --> DB[("🗄️ SQLite<br/>terminal_ops.db<br/>telemetry + hub")]
+        GR2 --> KB[["📚 Knowledge Base<br/>runbooks (.md)"]]
+    end
+
+    A1 --> ROOT
+    A2 --> ROOT
+    A3 --> ROOT
+    W --> ROOT
+    ROOT -->|synthesised RCA + next steps| UI
+
+    ROOT -.->|every model call| COST["📊 Observability<br/>(after_model_callback)<br/>tokens + USD cost"]
+    A1 -.-> COST
+    A2 -.-> COST
+    A3 -.-> COST
+    COST -.-> UI
+
+    EVAL["🧪 LLM-as-a-Judge<br/>eval.py · golden cases"] -.->|same agent stack| ROOT
+```
+
+**Read it top to bottom:** the operator asks in plain language → the **input guardrail** screens
+the request → the **root coordinator** routes to the one relevant platform specialist (plus
+weather if needed) → specialists reach the database and runbooks **only** through the **MCP
+server**, where the **data guardrail** enforces read-only access → the coordinator synthesises a
+single RCA + next-step answer back to the UI. Every model call is metered for **cost**, and the
+**same agent stack** is what the automated evaluation harness grades.
+
+---
+
 ## Architecture summary
 
 The assistant is a **root coordinator that routes to per-system specialists**. From each
