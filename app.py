@@ -12,7 +12,9 @@ Each conversation has its OWN agent session, so chats never share context.
 import os
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+MYT = timezone(timedelta(hours=8))   # Malaysia time; Cloud server clock is UTC
 
 import streamlit as st
 
@@ -368,7 +370,7 @@ WELCOME_CARDS = [
 ]
 
 if not messages and not st.session_state.get("pending"):
-    hour = datetime.now().hour
+    hour = datetime.now(MYT).hour
     greet = ("Good morning" if hour < 12 else
              "Good afternoon" if hour < 18 else "Good evening")
     st.markdown(f"<div class='hero-greet'>{greet}, how can I help?</div>",
