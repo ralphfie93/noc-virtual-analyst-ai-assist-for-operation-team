@@ -1,0 +1,20 @@
+# Secrets — never commit real keys
+.streamlit/secrets.toml
+.env
+
+# The 136 MB source telemetry DB (committed file is Database/terminal_ops.db, built
+# from this by build_db.py). Keep the big source out of git.
+Database/terminal_performance.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
