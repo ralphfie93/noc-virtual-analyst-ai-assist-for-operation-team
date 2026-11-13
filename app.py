@@ -39,36 +39,34 @@ st.markdown(
     """
     <style>
       :root { --accent:#4F46E5; --surface:#FFFFFF; --line:#E5E7EB; --muted:#6B7280; }
-      /* Hide default Streamlit chrome for a cleaner app shell */
-      #MainMenu, footer, [data-testid="stToolbar"] { visibility:hidden; height:0; }
-      /* Centered content column (Copilot-like) */
-      .block-container { max-width: 880px; padding-top: 1.2rem; padding-bottom: 6rem; }
-      /* Suggestion cards = secondary buttons */
-      button[kind="secondary"] {
+      #MainMenu, footer { visibility:hidden; height:0; }
+      /* Centered content column with enough top room so the header never clips */
+      .block-container { max-width: 900px; padding-top: 3rem; padding-bottom: 6rem; }
+      /* Suggestion cards — scoped to the suggestions container only */
+      .st-key-suggestions button {
           border-radius:14px !important; border:1px solid var(--line) !important;
-          padding:14px 16px !important; text-align:left !important;
+          padding:16px !important; min-height:72px;
+          justify-content:flex-start !important; text-align:left !important;
           background:var(--surface) !important; box-shadow:0 1px 2px rgba(0,0,0,.04);
-          transition:all .15s ease; font-weight:500; min-height:64px;
+          transition:all .15s ease; font-weight:500;
       }
-      button[kind="secondary"]:hover {
+      .st-key-suggestions button:hover {
           border-color:var(--accent) !important; transform:translateY(-2px);
           box-shadow:0 8px 20px rgba(79,70,229,.14) !important;
       }
-      /* Minimal top-bar actions = tertiary buttons */
-      button[kind="tertiary"] { color:var(--muted) !important; font-weight:600; }
-      button[kind="tertiary"]:hover { color:var(--accent) !important; }
+      .st-key-suggestions button p { text-align:left !important; width:100%; }
       /* Rounded chat input */
-      [data-testid="stChatInput"] { border-radius:26px !important; border:1px solid var(--line); }
+      [data-testid="stChatInput"] { border-radius:26px !important; }
       /* Cost chip */
       .cost-chip {
-          display:inline-block; padding:6px 12px; border-radius:999px;
+          display:inline-block; padding:5px 12px; border-radius:999px;
           background:#EEF2FF; color:var(--accent); font-size:0.8rem; font-weight:600;
           border:1px solid #E0E7FF; white-space:nowrap;
       }
-      .hero-greet { font-size:2.1rem; font-weight:700; margin:0.2rem 0 0.1rem; }
+      .hero-greet { font-size:2.1rem; font-weight:700; margin:0.4rem 0 0.1rem; }
       .hero-sub { color:var(--muted); font-size:1.02rem; margin-bottom:1.3rem; }
-      .brand { font-size:1.25rem; font-weight:700; }
-      .brand small { color:var(--muted); font-weight:500; font-size:0.8rem; }
+      .brand { font-size:1.2rem; font-weight:700; line-height:1.25; }
+      .brand-sub { color:var(--muted); font-weight:500; font-size:0.8rem; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -316,22 +314,22 @@ def tools_dialog():
 backend = get_backend()
 settings = st.session_state.settings
 
-left, right = st.columns([0.45, 0.55])
+left, right = st.columns([0.52, 0.48])
 with left:
-    st.markdown(f"<div class='brand'>🛰️ {settings['name']}<br>"
-                f"<small>{MODEL} · read-only · guardrailed</small></div>",
+    st.markdown(f"<div class='brand'>🛰️ {settings['name']}</div>"
+                f"<div class='brand-sub'>{MODEL} · read-only · guardrailed</div>",
                 unsafe_allow_html=True)
 with right:
     snap = COST.snapshot()
-    chip, b_tools, b_set, b_new = st.columns([0.34, 0.22, 0.24, 0.20])
-    chip.markdown(f"<div style='text-align:right;padding-top:6px'>"
-                  f"<span class='cost-chip'>${snap['usd']:.4f} · {snap['calls']} calls</span>"
-                  f"</div>", unsafe_allow_html=True)
-    if b_tools.button("🛠️ Tools", type="tertiary", use_container_width=True):
+    st.markdown(f"<div style='text-align:right;margin-bottom:6px'>"
+                f"<span class='cost-chip'>${snap['usd']:.4f} · {snap['calls']} calls</span>"
+                f"</div>", unsafe_allow_html=True)
+    b_tools, b_set, b_new = st.columns(3)
+    if b_tools.button("🛠️ Tools", use_container_width=True):
         tools_dialog()
-    if b_set.button("⚙️ Settings", type="tertiary", use_container_width=True):
+    if b_set.button("⚙️ Settings", use_container_width=True):
         settings_dialog()
-    if b_new.button("🆕 New", type="tertiary", use_container_width=True):
+    if b_new.button("🆕 New", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
@@ -357,12 +355,12 @@ if not st.session_state.messages:
     st.markdown(f"<div class='hero-sub'>I'm {settings['name']} — ask me about iDirect, "
                 f"HNS JUPITER, Starlink terminals, the hub, incidents, or site weather."
                 f"</div>", unsafe_allow_html=True)
-    cols = st.columns(2)
-    for i, q in enumerate(SUGGESTED):
-        if cols[i % 2].button(q, key=f"sg_{i}", type="secondary",
-                              use_container_width=True):
-            st.session_state.pending = q
-            st.rerun()
+    with st.container(key="suggestions"):
+        cols = st.columns(2)
+        for i, q in enumerate(SUGGESTED):
+            if cols[i % 2].button(q, key=f"sg_{i}", use_container_width=True):
+                st.session_state.pending = q
+                st.rerun()
 else:
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
